@@ -1,0 +1,22 @@
+{
+  "dataset": "B",
+  "mert": "95M",
+  "mert_model": "m-a-p/MERT-v1-95M",
+  "pooling": "mean",
+  "classifier": "linear_svm",
+  "svm_c": 0.001,
+  "feature_dim": 768,
+  "train_top1": 0.556390977443609,
+  "train_top3": 0.8847117794486216,
+  "val_top1": 0.3235294117647059,
+  "val_top3": 0.5784313725490197,
+  "generalization_gap": 0.2328615656789031,
+  "classes": [
+    "Brazil",
+    "Germany",
+    "Italy",
+    "Spain",
+    "UK",
+    "US"
+  ]
+}

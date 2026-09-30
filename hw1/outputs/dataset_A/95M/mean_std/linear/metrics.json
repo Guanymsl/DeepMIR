@@ -1,0 +1,22 @@
+{
+  "dataset": "A",
+  "mert": "95M",
+  "mert_model": "m-a-p/MERT-v1-95M",
+  "pooling": "mean_std",
+  "classifier": "linear_svm",
+  "svm_c": 0.001,
+  "feature_dim": 1536,
+  "train_top1": 0.804093567251462,
+  "train_top3": 0.9736842105263158,
+  "val_top1": 0.3560606060606061,
+  "val_top3": 0.803030303030303,
+  "generalization_gap": 0.4480329611908559,
+  "classes": [
+    "1960s",
+    "1970s",
+    "1980s",
+    "1990s",
+    "2000s",
+    "2010s"
+  ]
+}
