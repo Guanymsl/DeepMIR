@@ -70,10 +70,14 @@ def extract_acoustic_features(waveform):
     dynamic_range = peak - mean_rms
     rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=MERT_SAMPLE_RATE, roll_percent=0.85)))
 
-    tempo, _ = librosa.beat.beat_track(y=y, sr=MERT_SAMPLE_RATE)
-    tempo_val = float(tempo[0]) if isinstance(tempo, (list, np.ndarray)) else float(tempo)
+    spec = np.abs(librosa.stft(y)) ** 2
+    freqs = librosa.fft_frequencies(sr=MERT_SAMPLE_RATE)
+    sub_bass_mask = (freqs >= 20) & (freqs <= 60)
+    sub_bass_energy = np.sum(spec[sub_bass_mask, :])
+    total_energy = np.sum(spec) + 1e-6
+    sub_bass_ratio = float(sub_bass_energy / total_energy)
 
-    return np.array([crest_factor, dynamic_range, rolloff, tempo_val], dtype=np.float32)
+    return np.array([crest_factor, dynamic_range, rolloff, sub_bass_ratio], dtype=np.float32)
 
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
@@ -140,7 +144,9 @@ def extract_mert_feature(
             else:
                 h = captured[layer][0]
 
-            feature = h.mean(dim=0)
+            mean = h.mean(dim=0)
+            std = h.std(dim=0)
+            feature = torch.cat([mean, std], dim=0)
             features.append(feature)
 
         mert_feature = torch.stack(features, dim=0).mean(dim=0).cpu().numpy().astype(np.float32)
