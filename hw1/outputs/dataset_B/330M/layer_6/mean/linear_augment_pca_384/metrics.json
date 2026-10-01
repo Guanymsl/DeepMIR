@@ -1,0 +1,30 @@
+{
+  "dataset": "B",
+  "augmentation": true,
+  "mert": "330M",
+  "mert_model": "m-a-p/MERT-v1-330M",
+  "layers": [
+    6
+  ],
+  "pooling": "mean",
+  "pca": 384,
+  "classifier": "linear",
+  "c": 0.003,
+  "feature_dim": 1024,
+  "original_train_samples": 798,
+  "train_samples": 1596,
+  "train_top1": 0.8583959899749374,
+  "train_top3": 0.981203007518797,
+  "val_top1": 0.47058823529411764,
+  "val_top3": 0.7254901960784313,
+  "generalization_gap": 0.38780775468081974,
+  "classes": [
+    "Brazil",
+    "Germany",
+    "Italy",
+    "Spain",
+    "UK",
+    "US"
+  ],
+  "crop_seconds": 15
+}

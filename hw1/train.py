@@ -1,27 +1,23 @@
-import argparse
-import json
-from pathlib import Path
-
-import joblib
-import numpy as np
-import pandas as pd
 import torch
 import torchaudio
+import argparse
+import hashlib
+import json
+import joblib
 
-from tqdm import tqdm
-from transformers import AutoModel, Wav2Vec2FeatureExtractor
-
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
-from sklearn.metrics import (
-    accuracy_score,
-    confusion_matrix,
-    ConfusionMatrixDisplay,
-)
-
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 
+from pathlib import Path
+from tqdm import tqdm
+from transformers import AutoModel, Wav2Vec2FeatureExtractor
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (accuracy_score, confusion_matrix, ConfusionMatrixDisplay)
+from sklearn.pipeline import Pipeline
 
 MERT_MODELS = {
     "95M": "m-a-p/MERT-v1-95M",
@@ -34,10 +30,8 @@ MERT_LAYERS = {
 }
 
 MERT_SAMPLE_RATE = 24000
-NUM_SEGMENTS = 3
-CROP_SECONDS = 20
+CROP_SECONDS = 15
 RANDOM_SEED = 42
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -45,12 +39,12 @@ def parse_args():
     parser.add_argument("--dataset", type=str, default="A", choices=["A", "B"])
     parser.add_argument("--augment", action="store_true")
     parser.add_argument("--mert", type=str, default="95M", choices=["95M", "330M"])
-    parser.add_argument("--layer", type=int, default=-1)
-    parser.add_argument("--pooling", type=str, default="mean_std", choices=["mean", "mean_std", "segment_mean_std"])
-    parser.add_argument("--classifier", type=str, default="linear", choices=["linear", "rbf"])
+    parser.add_argument("--layer", type=int, nargs="+", default=[-1])
+    parser.add_argument("--pooling", type=str, default="mean_std", choices=["mean", "mean_std"])
+    parser.add_argument("--pca", type=int, default=0)
+    parser.add_argument("--classifier", type=str, default="linear", choices=["linear", "logistic"])
 
     return parser.parse_args()
-
 
 def load_audio(path):
     waveform, sr = torchaudio.load(path)
@@ -70,12 +64,13 @@ def random_crop(waveform, sample_id):
     if len(waveform) <= crop_length:
         return waveform
 
-    rng = np.random.default_rng(RANDOM_SEED + int(sample_id))
+    seed = int(hashlib.sha256(str(sample_id).encode()).hexdigest()[:8], 16)
+    rng = np.random.default_rng(RANDOM_SEED + seed)
+
     max_start = len(waveform) - crop_length
     start = rng.integers(0, max_start + 1)
 
     return waveform[start:start + crop_length]
-
 
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
@@ -88,6 +83,14 @@ def load_mert(model_name, device):
 
     return processor, model
 
+def pool_hidden_state(h, pooling):
+    if pooling == "mean":
+        return h.mean(dim=0)
+
+    mean = h.mean(dim=0)
+    std = h.std(dim=0)
+
+    return torch.cat([mean, std], dim=0)
 
 @torch.no_grad()
 def extract_mert_feature(
@@ -96,79 +99,60 @@ def extract_mert_feature(
     model,
     device,
     pooling,
-    layer,
+    layers,
     augment=False,
     sample_id=None,
 ):
     waveform = load_audio(audio_path)
-
     if augment:
         waveform = random_crop(waveform, sample_id)
 
-    inputs = processor(
-        waveform.numpy(),
-        sampling_rate=MERT_SAMPLE_RATE,
-        return_tensors="pt",
-    )
-
+    inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors="pt")
     input_values = inputs["input_values"].to(device)
 
-    if layer == -1:
-        outputs = model(input_values)
-        h = outputs.last_hidden_state[0]
+    captured = {}
+    handles = []
+    if 0 in layers:
+        def pre_hook(module, input):
+            captured[0] = input[0]
 
-    elif layer == 0:
-        captured = {}
+        handle = model.encoder.layers[0].register_forward_pre_hook(pre_hook)
+        handles.append(handle)
 
-        def hook(module, input):
-            captured["h"] = input[0]
+    for layer in layers:
+        if layer <= 0:
+            continue
 
-        handle = model.encoder.layers[0].register_forward_pre_hook(hook)
-        model(input_values)
+        def make_hook(layer_id):
+            def hook(module, input, output):
+                if isinstance(output, tuple):
+                    captured[layer_id] = output[0]
+                else:
+                    captured[layer_id] = output
+
+            return hook
+
+        handle = model.encoder.layers[layer - 1].register_forward_hook(make_hook(layer))
+        handles.append(handle)
+
+    outputs = model(input_values)
+
+    for handle in handles:
         handle.remove()
 
-        h = captured["h"][0]
+    features = []
+    for layer in layers:
+        if layer == -1:
+            h = outputs.last_hidden_state[0]
+        else:
+            h = captured[layer][0]
 
-    else:
-        captured = {}
+        feature = pool_hidden_state(h, pooling)
+        features.append(feature)
 
-        def hook(module, input, output):
-            if isinstance(output, tuple):
-                captured["h"] = output[0]
-            else:
-                captured["h"] = output
-
-        handle = model.encoder.layers[layer - 1].register_forward_hook(hook)
-        model(input_values)
-        handle.remove()
-
-        h = captured["h"][0]
-
-    if pooling == "mean":
-        feature = h.mean(dim=0)
-
-    elif pooling == "mean_std":
-        mean = h.mean(dim=0)
-        std = h.std(dim=0)
-        feature = torch.cat([mean, std], dim=0)
-
-    elif pooling == "segment_mean_std":
-        segments = torch.tensor_split(h, NUM_SEGMENTS, dim=0)
-        segment_features = []
-
-        for segment in segments:
-            mean = segment.mean(dim=0)
-            std = segment.std(dim=0)
-            segment_feature = torch.cat([mean, std], dim=0)
-            segment_features.append(segment_feature)
-
-        feature = torch.cat(segment_features, dim=0)
-
-    else:
-        raise ValueError("Unknown pooling method")
+    feature = torch.cat(features, dim=0)
 
     return feature.cpu().numpy().astype(np.float32)
-
 
 def extract_split(
     df,
@@ -177,7 +161,7 @@ def extract_split(
     model,
     device,
     pooling,
-    layer,
+    layers,
     cache_dir,
 ):
     features = []
@@ -186,17 +170,11 @@ def extract_split(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for _, row in tqdm(
-        df.iterrows(),
-        total=len(df),
-        desc="Extracting MERT",
-    ):
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting MERT"):
         sample_id = row["sample_id"]
         cache_file = cache_dir / f"{sample_id}.npy"
-
         if cache_file.exists():
             feature = np.load(cache_file)
-
         else:
             audio_path = dataset_dir / row["audio_path"]
 
@@ -206,7 +184,7 @@ def extract_split(
                 model,
                 device,
                 pooling,
-                layer,
+                layers,
             )
 
             np.save(cache_file, feature)
@@ -218,14 +196,12 @@ def extract_split(
             labels.append(str(row["label"]))
 
     X = np.stack(features)
-
     if len(labels) == len(df):
         y = np.array(labels)
     else:
         y = None
 
     return X, y, sample_ids
-
 
 def extract_augmented_split(
     df,
@@ -234,7 +210,7 @@ def extract_augmented_split(
     model,
     device,
     pooling,
-    layer,
+    layers,
     cache_dir,
 ):
     features = []
@@ -242,17 +218,11 @@ def extract_augmented_split(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for _, row in tqdm(
-        df.iterrows(),
-        total=len(df),
-        desc="Extracting augmented MERT",
-    ):
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting augmented MERT"):
         sample_id = row["sample_id"]
         cache_file = cache_dir / f"{sample_id}.npy"
-
         if cache_file.exists():
             feature = np.load(cache_file)
-
         else:
             audio_path = dataset_dir / row["audio_path"]
 
@@ -262,7 +232,7 @@ def extract_augmented_split(
                 model,
                 device,
                 pooling,
-                layer,
+                layers,
                 augment=True,
                 sample_id=sample_id,
             )
@@ -277,20 +247,16 @@ def extract_augmented_split(
 
     return X, y
 
-
 def top_k_accuracy(y_true, scores, classes, k):
     top_indices = np.argsort(scores, axis=1)[:, ::-1][:, :k]
 
     correct = 0
-
     for i, label in enumerate(y_true):
         predicted_labels = classes[top_indices[i]]
-
         if label in predicted_labels:
             correct += 1
 
     return correct / len(y_true)
-
 
 def evaluate(classifier, X, y):
     scores = classifier.decision_function(X)
@@ -304,57 +270,66 @@ def evaluate(classifier, X, y):
 
     return top1, top3, y_pred, scores
 
-
 def main():
     args = parse_args()
 
     max_layer = MERT_LAYERS[args.mert]
-
-    if args.layer != -1 and not 0 <= args.layer <= max_layer:
-        raise ValueError(f"Layer must be between 0 and {max_layer}, or -1 for final layer")
+    for layer in args.layer:
+        if layer != -1 and not 0 <= layer <= max_layer:
+            raise ValueError(f"Layer must be between 0 and {max_layer}, or -1 for final layer")
+    if len(set(args.layer)) != len(args.layer):
+        raise ValueError("Duplicate layers are not allowed")
+    if args.pca < 0:
+        raise ValueError("PCA must be 0 or a positive integer")
 
     mert_model = MERT_MODELS[args.mert]
 
-    if args.layer == -1:
-        layer_name = "final"
+    layer_names = []
+    for layer in args.layer:
+        if layer == -1:
+            layer_names.append("final")
+        else:
+            layer_names.append(str(layer))
+    if len(args.layer) == 1:
+        if args.layer[0] == -1:
+            layer_name = "final"
+        else:
+            layer_name = f"layer_{args.layer[0]}"
     else:
-        layer_name = f"layer_{args.layer}"
+        layer_name = "layers_" + "_".join(layer_names)
 
     dataset_name = f"dataset_{args.dataset}"
     dataset_dir = Path(f"data/{dataset_name}")
-
     feature_dir = Path(f"outputs/{dataset_name}/{args.mert}/{layer_name}/{args.pooling}")
 
+    output_name = args.classifier
     if args.augment:
-        output_dir = feature_dir / f"{args.classifier}_augment"
-    else:
-        output_dir = feature_dir / args.classifier
+        output_name += "_augment"
+    if args.pca > 0:
+        output_name += f"_pca_{args.pca}"
 
+    output_dir = feature_dir / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cache_dir = feature_dir / "features"
     augment_cache_dir = feature_dir / f"features_crop_{CROP_SECONDS}s"
 
     print(f"Dataset: {dataset_name}")
-    print(f"MERT: {args.mert}")
-    print(f"Layer: {args.layer}")
-    print(f"Pooling: {args.pooling}")
-    print(f"Classifier: {args.classifier}")
     print(f"Augmentation: {args.augment}")
-
-    if args.pooling == "segment_mean_std":
-        print(f"Segments: {NUM_SEGMENTS}")
-
     if args.augment:
         print(f"Crop: {CROP_SECONDS}s")
+    print(f"MERT: {args.mert}")
+    print(f"Layers: {args.layer}")
+    print(f"Pooling: {args.pooling}")
+    print(f"PCA: {args.pca}")
+    print(f"Classifier: {args.classifier}")
 
     df = pd.read_csv(dataset_dir / "manifest.csv")
     train_df = df[df["split"] == "train"].reset_index(drop=True)
     val_df = df[df["split"] == "validation"].reset_index(drop=True)
     test_df = df[df["split"] == "test"].reset_index(drop=True)
 
-    print()
-    print("Samples")
+    print("\nSamples")
     print("Train:", len(train_df))
     print("Validation:", len(val_df))
     print("Test:", len(test_df))
@@ -366,13 +341,11 @@ def main():
     else:
         device = torch.device("cpu")
 
-    print()
-    print("Device:", device)
+    print("\nDevice:", device)
 
     processor, mert = load_mert(mert_model, device)
 
     print("\nExtracting TRAIN features")
-
     X_train, y_train, _ = extract_split(
         train_df,
         dataset_dir,
@@ -388,7 +361,6 @@ def main():
 
     if args.augment:
         print("\nExtracting AUGMENTED TRAIN features")
-
         X_aug, y_aug = extract_augmented_split(
             train_df,
             dataset_dir,
@@ -404,7 +376,6 @@ def main():
         y_train = np.concatenate([y_train, y_aug], axis=0)
 
     print("\nExtracting VALIDATION features")
-
     X_val, y_val, _ = extract_split(
         val_df,
         dataset_dir,
@@ -416,12 +387,13 @@ def main():
         cache_dir,
     )
 
-    print()
-    print("Feature shape:", X_train.shape)
+    print("\nFeature shape:", X_train.shape)
     print("Training samples:", len(X_train))
 
-    del mert
+    if args.pca > min(X_train.shape):
+        raise ValueError(f"PCA components cannot exceed {min(X_train.shape)}")
 
+    del mert
     if device.type == "cuda":
         torch.cuda.empty_cache()
     elif device.type == "mps":
@@ -439,47 +411,40 @@ def main():
         ]
     else:
         C_VALUES = [
+            0.001,
+            0.003,
             0.01,
+            0.03,
             0.1,
+            0.3,
             1,
+            3,
             10,
-            100,
         ]
 
     best_classifier = None
     best_c = None
     best_top1 = -1
 
-    print("\nTuning SVM...")
+    if args.classifier == "logistic":
+        print("\nTuning Logistic Regression...")
+    else:
+        print("\nTuning Linear SVM...")
 
     for C in C_VALUES:
-        classifier = Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                (
-                    "svm",
-                    SVC(
-                        kernel=args.classifier,
-                        C=C,
-                        gamma="scale",
-                    ),
-                ),
-            ]
-        )
+        steps = [("scaler", StandardScaler())]
+        if args.pca > 0:
+            steps.append(("pca", PCA(n_components=args.pca, random_state=RANDOM_SEED)))
+        if args.classifier == "logistic":
+            steps.append(("logistic", LogisticRegression(C=C, max_iter=5000, random_state=RANDOM_SEED)))
+        else:
+            steps.append(("svm", SVC(kernel="linear", C=C)))
 
+        classifier = Pipeline(steps)
         classifier.fit(X_train, y_train)
 
-        train_top1, train_top3, _, _ = evaluate(
-            classifier,
-            X_train,
-            y_train,
-        )
-
-        val_top1, val_top3, _, _ = evaluate(
-            classifier,
-            X_val,
-            y_val,
-        )
+        train_top1, train_top3, _, _ = evaluate(classifier, X_train, y_train)
+        val_top1, val_top3, _, _ = evaluate(classifier, X_val, y_val)
 
         print(
             f"C={C:<7} "
@@ -499,22 +464,11 @@ def main():
     print()
     print("Best C:", best_c)
 
-    train_top1, train_top3, _, _ = evaluate(
-        classifier,
-        X_train,
-        y_train,
-    )
-
-    val_top1, val_top3, y_pred, val_scores = evaluate(
-        classifier,
-        X_val,
-        y_val,
-    )
-
+    train_top1, train_top3, _, _ = evaluate(classifier, X_train, y_train)
+    val_top1, val_top3, y_pred, val_scores = evaluate(classifier, X_val, y_val)
     generalization_gap = train_top1 - val_top1
 
-    print()
-    print("==============================")
+    print("\n==============================")
     print("Results")
     print("==============================")
     print(f"Train Top-1 Accuracy: {train_top1:.4f}")
@@ -525,29 +479,15 @@ def main():
 
     classes = classifier.classes_
     cm = confusion_matrix(y_val, y_pred, labels=classes)
-
     print("\nConfusion Matrix")
     print(classes)
     print(cm)
 
-    disp = ConfusionMatrixDisplay(
-        confusion_matrix=cm,
-        display_labels=classes,
-    )
-
-    disp.plot(
-        xticks_rotation=45,
-    )
-
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=classes)
+    disp.plot(xticks_rotation=45)
     plt.tight_layout()
-
     cm_path = output_dir / "confusion_matrix.png"
-
-    plt.savefig(
-        cm_path,
-        dpi=200,
-    )
-
+    plt.savefig(cm_path, dpi=200)
     plt.close()
 
     model_path = output_dir / "classifier.joblib"
@@ -555,13 +495,14 @@ def main():
 
     metrics = {
         "dataset": args.dataset,
+        "augmentation": args.augment,
         "mert": args.mert,
         "mert_model": mert_model,
-        "layer": args.layer,
+        "layers": args.layer,
         "pooling": args.pooling,
-        "augmentation": args.augment,
-        "classifier": f"{args.classifier}_svm",
-        "svm_c": best_c,
+        "pca": args.pca,
+        "classifier": args.classifier,
+        "c": best_c,
         "feature_dim": int(X_train.shape[1]),
         "original_train_samples": int(original_train_size),
         "train_samples": int(len(X_train)),
@@ -575,27 +516,11 @@ def main():
 
     if args.augment:
         metrics["crop_seconds"] = CROP_SECONDS
-
-    if args.pooling == "segment_mean_std":
-        metrics["segments"] = NUM_SEGMENTS
-
-    if args.classifier == "rbf":
-        metrics["gamma"] = "scale"
-
     metrics_path = output_dir / "metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2)
 
-    with open(
-        metrics_path,
-        "w",
-    ) as f:
-        json.dump(
-            metrics,
-            f,
-            indent=2,
-        )
-
-    print()
-    print("Saved:")
+    print("\nSaved:")
     print(model_path)
     print(cm_path)
     print(metrics_path)
