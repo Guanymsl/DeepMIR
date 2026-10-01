@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import joblib
+import librosa
 
 import pandas as pd
 import numpy as np
@@ -12,21 +13,12 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 from transformers import AutoModel, Wav2Vec2FeatureExtractor
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler, Normalizer
+from sklearn.svm import LinearSVC
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 
-MERT_MODELS = {
-    "95M": "m-a-p/MERT-v1-95M",
-    "330M": "m-a-p/MERT-v1-330M",
-}
-
-MERT_LAYERS = {
-    "95M": 12,
-    "330M": 24,
-}
-
+MERT_MODEL = "m-a-p/MERT-v1-330M"
 MERT_SAMPLE_RATE = 24000
 CROP_SECONDS = 15
 RANDOM_SEED = 42
@@ -34,10 +26,8 @@ RANDOM_SEED = 42
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset", type=str, required=True, choices=["A", "B"])
     parser.add_argument("--augment", action="store_true")
-    parser.add_argument("--mert", type=str, required=True, choices=["95M", "330M"])
-    parser.add_argument("--layer", type=int, nargs="+", default=[-1])
+    parser.add_argument("--layer", type=int, nargs="+", default=[12])
 
     return parser.parse_args()
 
@@ -52,7 +42,6 @@ def load_audio(path):
 
     return waveform.squeeze(0)
 
-
 def random_crop(waveform, sample_id):
     crop_length = CROP_SECONDS * MERT_SAMPLE_RATE
 
@@ -66,6 +55,22 @@ def random_crop(waveform, sample_id):
     start = rng.integers(0, max_start + 1)
 
     return waveform[start:start + crop_length]
+
+def extract_acoustic_features(waveform):
+    y = waveform.numpy()
+
+    if len(y) == 0:
+        return np.zeros(3, dtype=np.float32)
+
+    peak = float(np.max(np.abs(y)))
+    rms = librosa.feature.rms(y=y)[0]
+    mean_rms = float(np.mean(rms)) if len(rms) > 0 else 1e-6
+
+    crest_factor = peak / (mean_rms + 1e-6)
+    dynamic_range = peak - mean_rms
+    rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=MERT_SAMPLE_RATE, roll_percent=0.85)))
+
+    return np.array([crest_factor, dynamic_range, rolloff], dtype=np.float32)
 
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
@@ -92,52 +97,57 @@ def extract_mert_feature(
     if augment:
         waveform = random_crop(waveform, sample_id)
 
+    acoustic_feature = extract_acoustic_features(waveform)
+
     inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors="pt")
     input_values = inputs["input_values"].to(device)
 
     captured = {}
     handles = []
-    if 0 in layers:
-        def pre_hook(module, input):
-            captured[0] = input[0]
+    try:
+        if 0 in layers:
+            def pre_hook(module, input):
+                captured[0] = input[0]
 
-        handle = model.encoder.layers[0].register_forward_pre_hook(pre_hook)
-        handles.append(handle)
+            handle = model.encoder.layers[0].register_forward_pre_hook(pre_hook)
+            handles.append(handle)
 
-    for layer in layers:
-        if layer <= 0:
-            continue
+        for layer in layers:
+            if layer <= 0:
+                continue
 
-        def make_hook(layer_id):
-            def hook(module, input, output):
-                if isinstance(output, tuple):
-                    captured[layer_id] = output[0]
-                else:
-                    captured[layer_id] = output
+            def make_hook(layer_id):
+                def hook(module, input, output):
+                    if isinstance(output, tuple):
+                        captured[layer_id] = output[0]
+                    else:
+                        captured[layer_id] = output
 
-            return hook
+                return hook
 
-        handle = model.encoder.layers[layer - 1].register_forward_hook(make_hook(layer))
-        handles.append(handle)
+            handle = model.encoder.layers[layer - 1].register_forward_hook(make_hook(layer))
+            handles.append(handle)
 
-    outputs = model(input_values)
+        outputs = model(input_values)
 
-    for handle in handles:
-        handle.remove()
+        features = []
+        for layer in layers:
+            if layer == -1:
+                h = outputs.last_hidden_state[0]
+            else:
+                h = captured[layer][0]
 
-    features = []
-    for layer in layers:
-        if layer == -1:
-            h = outputs.last_hidden_state[0]
-        else:
-            h = captured[layer][0]
+            feature = h.mean(dim=0)
+            features.append(feature)
 
-        feature = h.mean(dim=0)
-        features.append(feature)
+        mert_feature = torch.cat(features, dim=0).cpu().numpy().astype(np.float32)
+    finally:
+        for handle in handles:
+            handle.remove()
 
-    feature = torch.cat(features, dim=0)
+    feature = np.concatenate([mert_feature, acoustic_feature], axis=0)
 
-    return feature.cpu().numpy().astype(np.float32)
+    return feature
 
 def extract_split(
     df,
@@ -240,11 +250,7 @@ def top_k_accuracy(y_true, scores, classes, k):
     return correct / len(y_true)
 
 def evaluate(classifier, X, y):
-    if hasattr(classifier, "decision_function"):
-        scores = classifier.decision_function(X)
-    else:
-        scores = classifier.predict_proba(X)
-
+    scores = classifier.decision_function(X)
     classes = classifier.classes_
 
     top1_indices = np.argmax(scores, axis=1)
@@ -258,48 +264,36 @@ def evaluate(classifier, X, y):
 def main():
     args = parse_args()
 
-    max_layer = MERT_LAYERS[args.mert]
     for layer in args.layer:
-        if layer != -1 and not 0 <= layer <= max_layer:
-            raise ValueError(f"Layer must be between 0 and {max_layer}, or -1 for final layer")
-    if len(set(args.layer)) != len(args.layer):
-        raise ValueError("Duplicate layers are not allowed")
+        if not 0 <= layer <= 24:
+            raise ValueError(f"Layer must be between 0 and 24, or -1 for final layer")
 
-    mert_model = MERT_MODELS[args.mert]
+    mert_model = MERT_MODEL
 
     layer_names = []
     for layer in args.layer:
-        if layer == -1:
-            layer_names.append("final")
-        else:
-            layer_names.append(str(layer))
+        layer_names.append(str(layer))
     if len(args.layer) == 1:
-        if args.layer[0] == -1:
-            layer_name = "final"
-        else:
-            layer_name = f"layer_{args.layer[0]}"
+        layer_name = f"layer_{args.layer[0]}"
     else:
         layer_name = "layers_" + "_".join(layer_names)
 
-    dataset_name = f"dataset_{args.dataset}"
-    dataset_dir = Path(f"data/{dataset_name}")
-    feature_dir = Path(f"outputs/{dataset_name}/{args.mert}/{layer_name}")
+    dataset_dir = Path("data/dataset_A")
+    feature_dir = Path(f"outputs/A/{layer_name}")
 
     output_name = ""
     if args.augment:
-        output_name += "augment"
+        output_name = "augment"
 
     output_dir = feature_dir / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = feature_dir / "features"
-    augment_cache_dir = feature_dir / f"features_crop_{CROP_SECONDS}s"
+    cache_dir = feature_dir / "features_mean_acoustic"
+    augment_cache_dir = feature_dir / f"features_mean_acoustic_crop_{CROP_SECONDS}s"
 
-    print(f"Dataset: {dataset_name}")
     print(f"Augmentation: {args.augment}")
     if args.augment:
         print(f"Crop: {CROP_SECONDS}s")
-    print(f"MERT: {args.mert}")
     print(f"Layers: {args.layer}")
 
     df = pd.read_csv(dataset_dir / "manifest.csv")
@@ -372,9 +366,13 @@ def main():
     best_c = None
     best_top = -1
 
-    C = [0.00001, 0.00003, 0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100]
+    C = [0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1]
     for c in C:
-        steps = [("scaler", StandardScaler()), ("svm", SVC(kernel="linear", C=c, random_state=RANDOM_SEED))]
+        steps = [
+            ("scaler", StandardScaler()),
+            ("norm", Normalizer(norm="l2")),
+            ("svm", LinearSVC(C=c, penalty="l2", dual="auto", max_iter=10000, random_state=RANDOM_SEED))
+        ]
 
         classifier = Pipeline(steps)
         classifier.fit(X_train, y_train)
@@ -430,7 +428,6 @@ def main():
     joblib.dump(classifier, model_path)
 
     metrics = {
-        "dataset": args.dataset,
         "augmentation": args.augment,
         "mert_model": mert_model,
         "layers": args.layer,
