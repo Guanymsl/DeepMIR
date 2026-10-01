@@ -60,7 +60,7 @@ def extract_acoustic_features(waveform):
     y = waveform.numpy()
 
     if len(y) == 0:
-        return np.zeros(3, dtype=np.float32)
+        return np.zeros(4, dtype=np.float32)
 
     peak = float(np.max(np.abs(y)))
     rms = librosa.feature.rms(y=y)[0]
@@ -70,7 +70,10 @@ def extract_acoustic_features(waveform):
     dynamic_range = peak - mean_rms
     rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=MERT_SAMPLE_RATE, roll_percent=0.85)))
 
-    return np.array([crest_factor, dynamic_range, rolloff], dtype=np.float32)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=MERT_SAMPLE_RATE)
+    tempo_val = float(tempo[0]) if isinstance(tempo, (list, np.ndarray)) else float(tempo)
+
+    return np.array([crest_factor, dynamic_range, rolloff, tempo_val], dtype=np.float32)
 
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
@@ -140,7 +143,8 @@ def extract_mert_feature(
             feature = h.mean(dim=0)
             features.append(feature)
 
-        mert_feature = torch.cat(features, dim=0).cpu().numpy().astype(np.float32)
+        mert_feature = torch.stack(features, dim=0).mean(dim=0).cpu().numpy().astype(np.float32)
+
     finally:
         for handle in handles:
             handle.remove()
@@ -266,7 +270,7 @@ def main():
 
     for layer in args.layer:
         if not 0 <= layer <= 24:
-            raise ValueError(f"Layer must be between 0 and 24, or -1 for final layer")
+            raise ValueError(f"Layer must be between 0 and 24")
 
     mert_model = MERT_MODEL
 
@@ -288,8 +292,8 @@ def main():
     output_dir = feature_dir / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = feature_dir / "features_mean_acoustic"
-    augment_cache_dir = feature_dir / f"features_mean_acoustic_crop_{CROP_SECONDS}s"
+    cache_dir = feature_dir / "features_mix"
+    augment_cache_dir = feature_dir / f"features_mix_crop_{CROP_SECONDS}s"
 
     print(f"Augmentation: {args.augment}")
     if args.augment:
@@ -366,12 +370,12 @@ def main():
     best_c = None
     best_top = -1
 
-    C = [0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1]
+    C = [0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0]
     for c in C:
         steps = [
             ("scaler", StandardScaler()),
             ("norm", Normalizer(norm="l2")),
-            ("svm", LinearSVC(C=c, penalty="l2", dual="auto", max_iter=10000, random_state=RANDOM_SEED))
+            ("svm", LinearSVC(C=c, penalty="l2", dual="auto", class_weight="balanced", max_iter=10000, random_state=RANDOM_SEED))
         ]
 
         classifier = Pipeline(steps)
@@ -381,7 +385,7 @@ def main():
         val_top1, val_top3, _, _ = evaluate(classifier, X_val, y_val)
 
         print(
-            f"Param={c} "
+            f"Param={c:<6} "
             f"Train Top-1={train_top1:.4f} "
             f"Train Top-3={train_top3:.4f} "
             f"Val Top-1={val_top1:.4f} "

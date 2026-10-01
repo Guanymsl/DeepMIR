@@ -292,8 +292,8 @@ def main():
     output_dir = feature_dir / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = feature_dir / "features"
-    augment_cache_dir = feature_dir / f"features_crop_{CROP_SECONDS}s"
+    cache_dir = feature_dir / "features_mix"
+    augment_cache_dir = feature_dir / f"features_mix_crop_{CROP_SECONDS}s"
 
     print(f"Dataset: {dataset_name}")
     print(f"Augmentation: {args.augment}")

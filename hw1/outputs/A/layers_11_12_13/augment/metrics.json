@@ -1,0 +1,24 @@
+{
+  "augmentation": true,
+  "mert_model": "m-a-p/MERT-v1-330M",
+  "layers": [
+    11,
+    12,
+    13
+  ],
+  "c": 0.2,
+  "train_top1": 0.7066276803118908,
+  "train_top3": 0.9615009746588694,
+  "val_top1": 0.44696969696969696,
+  "val_top3": 0.8106060606060606,
+  "generalization_gap": 0.25965798334219387,
+  "classes": [
+    "1960s",
+    "1970s",
+    "1980s",
+    "1990s",
+    "2000s",
+    "2010s"
+  ],
+  "crop_seconds": 15
+}
