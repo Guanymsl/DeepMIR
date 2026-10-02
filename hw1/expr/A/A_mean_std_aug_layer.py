@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import joblib
-import librosa
 
 import pandas as pd
 import numpy as np
@@ -26,7 +25,6 @@ RANDOM_SEED = 42
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--augment", action="store_true")
     parser.add_argument("--layer", type=int, nargs="+", default=[12])
 
     return parser.parse_args()
@@ -56,29 +54,6 @@ def random_crop(waveform, sample_id):
 
     return waveform[start:start + crop_length]
 
-def extract_acoustic_features(waveform):
-    y = waveform.numpy()
-
-    if len(y) == 0:
-        return np.zeros(4, dtype=np.float32)
-
-    peak = float(np.max(np.abs(y)))
-    rms = librosa.feature.rms(y=y)[0]
-    mean_rms = float(np.mean(rms)) if len(rms) > 0 else 1e-6
-
-    crest_factor = peak / (mean_rms + 1e-6)
-    dynamic_range = peak - mean_rms
-    rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=MERT_SAMPLE_RATE, roll_percent=0.85)))
-
-    spec = np.abs(librosa.stft(y)) ** 2
-    freqs = librosa.fft_frequencies(sr=MERT_SAMPLE_RATE)
-    sub_bass_mask = (freqs >= 20) & (freqs <= 60)
-    sub_bass_energy = np.sum(spec[sub_bass_mask, :])
-    total_energy = np.sum(spec) + 1e-6
-    sub_bass_ratio = float(sub_bass_energy / total_energy)
-
-    return np.array([crest_factor, dynamic_range, rolloff, sub_bass_ratio], dtype=np.float32)
-
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
 
@@ -103,8 +78,6 @@ def extract_mert_feature(
     waveform = load_audio(audio_path)
     if augment:
         waveform = random_crop(waveform, sample_id)
-
-    acoustic_feature = extract_acoustic_features(waveform)
 
     inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors="pt")
     input_values = inputs["input_values"].to(device)
@@ -155,7 +128,7 @@ def extract_mert_feature(
         for handle in handles:
             handle.remove()
 
-    feature = np.concatenate([mert_feature, acoustic_feature], axis=0)
+    feature = np.concatenate([mert_feature], axis=0)
 
     return feature
 
@@ -288,33 +261,25 @@ def main():
     else:
         layer_name = "layers_" + "_".join(layer_names)
 
-    dataset_dir = Path("data/dataset_A")
+    dataset_dir = Path("../../data/dataset_A")
     feature_dir = Path(f"outputs/A/{layer_name}")
 
-    output_name = ""
-    if args.augment:
-        output_name = "augment"
 
-    output_dir = feature_dir / output_name
+    output_dir = feature_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = feature_dir / "features_mix"
-    augment_cache_dir = feature_dir / f"features_mix_crop_{CROP_SECONDS}s"
+    cache_dir = feature_dir / "features"
+    augment_cache_dir = feature_dir / f"features_crop_{CROP_SECONDS}s"
 
-    print(f"Augmentation: {args.augment}")
-    if args.augment:
-        print(f"Crop: {CROP_SECONDS}s")
     print(f"Layers: {args.layer}")
 
     df = pd.read_csv(dataset_dir / "manifest.csv")
     train_df = df[df["split"] == "train"].reset_index(drop=True)
     val_df = df[df["split"] == "validation"].reset_index(drop=True)
-    test_df = df[df["split"] == "test"].reset_index(drop=True)
 
     print("\nSamples")
     print("Train:", len(train_df))
     print("Validation:", len(val_df))
-    print("Test:", len(test_df))
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -338,20 +303,19 @@ def main():
         cache_dir,
     )
 
-    if args.augment:
-        print("\nExtracting AUGMENTED TRAIN features")
-        X_aug, y_aug = extract_augmented_split(
-            train_df,
-            dataset_dir,
-            processor,
-            mert,
-            device,
-            args.layer,
-            augment_cache_dir,
-        )
+    print("\nExtracting AUGMENTED TRAIN features")
+    X_aug, y_aug = extract_augmented_split(
+        train_df,
+        dataset_dir,
+        processor,
+        mert,
+        device,
+        args.layer,
+        augment_cache_dir,
+    )
 
-        X_train = np.concatenate([X_train, X_aug], axis=0)
-        y_train = np.concatenate([y_train, y_aug], axis=0)
+    X_train = np.concatenate([X_train, X_aug], axis=0)
+    y_train = np.concatenate([y_train, y_aug], axis=0)
 
     print("\nExtracting VALIDATION features")
     X_val, y_val, _ = extract_split(
@@ -438,8 +402,6 @@ def main():
     joblib.dump(classifier, model_path)
 
     metrics = {
-        "augmentation": args.augment,
-        "mert_model": mert_model,
         "layers": args.layer,
         "c": best_c,
         "train_top1": float(train_top1),
@@ -450,8 +412,7 @@ def main():
         "classes": classes.tolist(),
     }
 
-    if args.augment:
-        metrics["crop_seconds"] = CROP_SECONDS
+    metrics["crop_seconds"] = CROP_SECONDS
     metrics_path = output_dir / "metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)

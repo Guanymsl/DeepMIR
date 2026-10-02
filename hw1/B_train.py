@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 from transformers import AutoModel, Wav2Vec2FeatureExtractor
+from demucs.api import Separator
 from sklearn.preprocessing import StandardScaler, Normalizer
 from sklearn.svm import LinearSVC
 from sklearn.pipeline import Pipeline
@@ -27,7 +28,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--augment", action="store_true")
-    parser.add_argument("--layer", type=int, nargs="+", default=[12])
+    parser.add_argument("--layer", type=int, nargs="+", default=[6])
+    parser.add_argument("--source", type=str, default="mix", choices=["mix", "vocals", "accompaniment"])
 
     return parser.parse_args()
 
@@ -56,28 +58,39 @@ def random_crop(waveform, sample_id):
 
     return waveform[start:start + crop_length]
 
-def extract_acoustic_features(waveform):
-    y = waveform.numpy()
+def load_source_audio(path, source, separator, source_cache_dir, sample_id):
+    if source == "mix":
+        return load_audio(path)
 
-    if len(y) == 0:
-        return np.zeros(4, dtype=np.float32)
+    source_cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = source_cache_dir / f"{sample_id}.npy"
 
-    peak = float(np.max(np.abs(y)))
-    rms = librosa.feature.rms(y=y)[0]
-    mean_rms = float(np.mean(rms)) if len(rms) > 0 else 1e-6
+    if cache_file.exists():
+        return torch.from_numpy(np.load(cache_file)).float()
 
-    crest_factor = peak / (mean_rms + 1e-6)
-    dynamic_range = peak - mean_rms
-    rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=MERT_SAMPLE_RATE, roll_percent=0.85)))
+    waveform, sr = torchaudio.load(path)
 
-    spec = np.abs(librosa.stft(y)) ** 2
-    freqs = librosa.fft_frequencies(sr=MERT_SAMPLE_RATE)
-    sub_bass_mask = (freqs >= 20) & (freqs <= 60)
-    sub_bass_energy = np.sum(spec[sub_bass_mask, :])
-    total_energy = np.sum(spec) + 1e-6
-    sub_bass_ratio = float(sub_bass_energy / total_energy)
+    if waveform.shape[0] == 1:
+        waveform = waveform.repeat(2, 1)
+    elif waveform.shape[0] > 2:
+        waveform = waveform[:2]
 
-    return np.array([crest_factor, dynamic_range, rolloff, sub_bass_ratio], dtype=np.float32)
+    _, stems = separator.separate_tensor(waveform, sr=sr)
+
+    if source == "vocals":
+        waveform = stems["vocals"]
+    else:
+        waveform = stems["drums"] + stems["bass"] + stems["other"]
+
+    waveform = waveform.mean(dim=0).cpu()
+
+    if separator.samplerate != MERT_SAMPLE_RATE:
+        waveform = torchaudio.functional.resample(waveform, separator.samplerate, MERT_SAMPLE_RATE)
+
+    waveform = waveform.float()
+    np.save(cache_file, waveform.numpy())
+
+    return waveform
 
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
@@ -97,14 +110,15 @@ def extract_mert_feature(
     model,
     device,
     layers,
+    source,
+    separator,
+    source_cache_dir,
     augment=False,
     sample_id=None,
 ):
-    waveform = load_audio(audio_path)
+    waveform = load_source_audio(audio_path, source, separator, source_cache_dir, sample_id)
     if augment:
         waveform = random_crop(waveform, sample_id)
-
-    acoustic_feature = extract_acoustic_features(waveform)
 
     inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors="pt")
     input_values = inputs["input_values"].to(device)
@@ -144,9 +158,7 @@ def extract_mert_feature(
             else:
                 h = captured[layer][0]
 
-            mean = h.mean(dim=0)
-            std = h.std(dim=0)
-            feature = torch.cat([mean, std], dim=0)
+            feature = h.mean(dim=0)
             features.append(feature)
 
         mert_feature = torch.stack(features, dim=0).mean(dim=0).cpu().numpy().astype(np.float32)
@@ -166,6 +178,9 @@ def extract_split(
     model,
     device,
     layers,
+    source,
+    separator,
+    source_cache_dir,
     cache_dir,
 ):
     features = []
@@ -188,6 +203,10 @@ def extract_split(
                 model,
                 device,
                 layers,
+                source,
+                separator,
+                source_cache_dir,
+                sample_id=sample_id,
             )
 
             np.save(cache_file, feature)
@@ -213,6 +232,9 @@ def extract_augmented_split(
     model,
     device,
     layers,
+    source,
+    separator,
+    source_cache_dir,
     cache_dir,
 ):
     features = []
@@ -234,6 +256,9 @@ def extract_augmented_split(
                 model,
                 device,
                 layers,
+                source,
+                separator,
+                source_cache_dir,
                 augment=True,
                 sample_id=sample_id,
             )
@@ -288,8 +313,8 @@ def main():
     else:
         layer_name = "layers_" + "_".join(layer_names)
 
-    dataset_dir = Path("data/dataset_A")
-    feature_dir = Path(f"outputs/A/{layer_name}")
+    dataset_dir = Path("data/dataset_B")
+    feature_dir = Path(f"outputs/B/{layer_name}/{args.source}")
 
     output_name = ""
     if args.augment:
@@ -298,13 +323,15 @@ def main():
     output_dir = feature_dir / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = feature_dir / "features_mix"
-    augment_cache_dir = feature_dir / f"features_mix_crop_{CROP_SECONDS}s"
+    cache_dir = feature_dir / "features"
+    augment_cache_dir = feature_dir / f"features_crop_{CROP_SECONDS}s"
+    source_cache_dir = dataset_dir / "separated" / args.source
 
     print(f"Augmentation: {args.augment}")
     if args.augment:
         print(f"Crop: {CROP_SECONDS}s")
     print(f"Layers: {args.layer}")
+    print(f"Source: {args.source}")
 
     df = pd.read_csv(dataset_dir / "manifest.csv")
     train_df = df[df["split"] == "train"].reset_index(drop=True)
@@ -325,6 +352,11 @@ def main():
 
     print("\nDevice:", device)
 
+    separator = None
+    if args.source != "mix":
+        print(f"\nLoading Demucs for {args.source} ...")
+        separator = Separator(model="htdemucs", device=str(device), shifts=1, overlap=0.25, split=True, progress=False)
+
     processor, mert = load_mert(mert_model, device)
 
     print("\nExtracting TRAIN features")
@@ -335,6 +367,9 @@ def main():
         mert,
         device,
         args.layer,
+        args.source,
+        separator,
+        source_cache_dir,
         cache_dir,
     )
 
@@ -347,6 +382,9 @@ def main():
             mert,
             device,
             args.layer,
+            args.source,
+            separator,
+            source_cache_dir,
             augment_cache_dir,
         )
 
@@ -361,12 +399,17 @@ def main():
         mert,
         device,
         args.layer,
+        args.source,
+        separator,
+        source_cache_dir,
         cache_dir,
     )
 
     print("\nFeature shape:", X_train.shape)
 
     del mert
+    if separator is not None:
+        del separator
     if device.type == "cuda":
         torch.cuda.empty_cache()
     elif device.type == "mps":
@@ -376,7 +419,7 @@ def main():
     best_c = None
     best_top = -1
 
-    C = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.5, 1.0]
+    C = [0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0]
     for c in C:
         steps = [
             ("scaler", StandardScaler()),
@@ -439,6 +482,7 @@ def main():
 
     metrics = {
         "augmentation": args.augment,
+        "source": args.source,
         "mert_model": mert_model,
         "layers": args.layer,
         "c": best_c,

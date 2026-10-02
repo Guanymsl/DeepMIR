@@ -1,0 +1,23 @@
+{
+  "augmentation": true,
+  "source": "accompaniment",
+  "mert_model": "m-a-p/MERT-v1-330M",
+  "layers": [
+    6
+  ],
+  "c": 0.05,
+  "train_top1": 0.5764411027568922,
+  "train_top3": 0.8966165413533834,
+  "val_top1": 0.4117647058823529,
+  "val_top3": 0.7450980392156863,
+  "generalization_gap": 0.16467639687453928,
+  "classes": [
+    "Brazil",
+    "Germany",
+    "Italy",
+    "Spain",
+    "UK",
+    "US"
+  ],
+  "crop_seconds": 15
+}
