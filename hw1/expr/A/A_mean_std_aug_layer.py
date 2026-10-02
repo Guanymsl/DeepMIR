@@ -262,7 +262,7 @@ def main():
         layer_name = "layers_" + "_".join(layer_names)
 
     dataset_dir = Path("../../data/dataset_A")
-    feature_dir = Path(f"outputs/A/{layer_name}")
+    feature_dir = Path(f"outputs/{layer_name}")
 
 
     output_dir = feature_dir
