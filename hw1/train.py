@@ -1,7 +1,10 @@
 import torch
 import torchaudio
+import argparse
+import hashlib
 import json
 import joblib
+import librosa
 
 import pandas as pd
 import numpy as np
@@ -17,7 +20,17 @@ from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDis
 
 MERT_MODEL = "m-a-p/MERT-v1-330M"
 MERT_SAMPLE_RATE = 24000
+CROP_SECONDS = 15
 RANDOM_SEED = 42
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", required=True, choices=["A", "B"])
+    parser.add_argument("--pooling",required=True, choices=["mean", "meanstd"])
+    parser.add_argument("--layer", default="last")
+    parser.add_argument("--augment", action="store_true")
+    parser.add_argument("--acoustic", action="store_true")
+    return parser.parse_args()
 
 def load_audio(path):
     waveform, sr = torchaudio.load(path)
@@ -29,6 +42,43 @@ def load_audio(path):
         waveform = torchaudio.functional.resample(waveform, sr, MERT_SAMPLE_RATE)
 
     return waveform.squeeze(0)
+
+def random_crop(waveform, sample_id):
+    crop_length = CROP_SECONDS * MERT_SAMPLE_RATE
+
+    if len(waveform) <= crop_length:
+        return waveform
+
+    seed = int(hashlib.sha256(str(sample_id).encode()).hexdigest()[:8], 16)
+    rng = np.random.default_rng(RANDOM_SEED + seed)
+
+    max_start = len(waveform) - crop_length
+    start = rng.integers(0, max_start + 1)
+
+    return waveform[start:start + crop_length]
+
+def extract_acoustic_features(waveform):
+    y = waveform.numpy()
+
+    if len(y) == 0:
+        return np.zeros(4, dtype=np.float32)
+
+    peak = float(np.max(np.abs(y)))
+    rms = librosa.feature.rms(y=y)[0]
+    mean_rms = float(np.mean(rms)) if len(rms) > 0 else 1e-6
+
+    crest_factor = peak / (mean_rms + 1e-6)
+    dynamic_range = peak - mean_rms
+    rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=MERT_SAMPLE_RATE, roll_percent=0.85)))
+
+    spec = np.abs(librosa.stft(y)) ** 2
+    freqs = librosa.fft_frequencies(sr=MERT_SAMPLE_RATE)
+    sub_bass_mask = (freqs >= 20) & (freqs <= 60)
+    sub_bass_energy = np.sum(spec[sub_bass_mask, :])
+    total_energy = np.sum(spec) + 1e-6
+    sub_bass_ratio = float(sub_bass_energy / total_energy)
+
+    return np.array([crest_factor, dynamic_range, rolloff, sub_bass_ratio], dtype=np.float32)
 
 def load_mert(model_name, device):
     print(f"Loading {model_name} ...")
@@ -47,18 +97,53 @@ def extract_mert_feature(
     processor,
     model,
     device,
+    pooling,
+    layer,
+    augment=False,
+    acoustic=False,
+    sample_id=None,
 ):
     waveform = load_audio(audio_path)
+    if augment:
+        waveform = random_crop(waveform, sample_id)
 
     inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors="pt")
     input_values = inputs["input_values"].to(device)
 
-    outputs = model(input_values)
-    h = outputs.last_hidden_state[0]
+    if layer == "last":
+        outputs = model(input_values)
+        h = outputs.last_hidden_state[0]
+    else:
+        captured = {}
+        layer = int(layer)
 
-    mert_feature = h.mean(dim=0).cpu().numpy().astype(np.float32)
+        if layer == 0:
+            def hook(module, input):
+                captured["h"] = input[0]
+            handle = model.encoder.layers[0].register_forward_pre_hook(hook)
+        else:
+            def hook(module, input, output):
+                captured["h"] = output[0] if isinstance(output, tuple) else output
+            handle = model.encoder.layers[layer - 1].register_forward_hook(hook)
 
-    return mert_feature
+        model(input_values)
+        handle.remove()
+        h = captured["h"][0]
+
+    mean = h.mean(dim=0)
+    if pooling == "mean":
+        mert_feature = mean.cpu().numpy().astype(np.float32)
+    else:
+        std = h.std(dim=0)
+        mert_feature = torch.cat([mean, std], dim=0).cpu().numpy().astype(np.float32)
+
+    if acoustic:
+        acoustic_feature = extract_acoustic_features(waveform)
+        feature = np.concatenate([mert_feature, acoustic_feature], axis=0)
+    else:
+        feature = mert_feature
+
+    return feature
 
 def extract_split(
     df,
@@ -67,6 +152,9 @@ def extract_split(
     model,
     device,
     cache_dir,
+    pooling,
+    layer,
+    acoustic,
 ):
     features = []
     labels = []
@@ -87,6 +175,9 @@ def extract_split(
                 processor,
                 model,
                 device,
+                pooling,
+                layer,
+                acoustic=acoustic,
             )
 
             np.save(cache_file, feature)
@@ -104,6 +195,52 @@ def extract_split(
         y = None
 
     return X, y, sample_ids
+
+def extract_augmented_split(
+    df,
+    dataset_dir,
+    processor,
+    model,
+    device,
+    cache_dir,
+    pooling,
+    layer,
+    acoustic,
+):
+    features = []
+    labels = []
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting augmented MERT"):
+        sample_id = row["sample_id"]
+        cache_file = cache_dir / f"{sample_id}.npy"
+        if cache_file.exists():
+            feature = np.load(cache_file)
+        else:
+            audio_path = dataset_dir / row["audio_path"]
+
+            feature = extract_mert_feature(
+                audio_path,
+                processor,
+                model,
+                device,
+                pooling,
+                layer,
+                augment=True,
+                acoustic=acoustic,
+                sample_id=sample_id,
+            )
+
+            np.save(cache_file, feature)
+
+        features.append(feature)
+        labels.append(str(row["label"]))
+
+    X = np.stack(features)
+    y = np.array(labels)
+
+    return X, y
 
 def top_k_accuracy(y_true, scores, classes, k):
     top_indices = np.argsort(scores, axis=1)[:, ::-1][:, :k]
@@ -129,15 +266,26 @@ def evaluate(classifier, X, y):
     return top1, top3, y_pred, scores
 
 def main():
+    args = parse_args()
+
+    if args.layer != "last" and not 0 <= int(args.layer) <= 24:
+        raise ValueError("Layer must be last or between 0 and 24")
+
     mert_model = MERT_MODEL
 
-    dataset_dir = Path("../../data/dataset_A")
-    feature_dir = Path("expr/mean")
+    dataset_dir = Path(f"data/dataset_{args.dataset}")
+    feature_dir = Path(f"outputs/{args.dataset}/{args.pooling}_{args.layer}" + ("_aug" if args.augment else "") + ("_acoustic" if args.acoustic else ""))
 
     output_dir = feature_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cache_dir = feature_dir / "features"
+    augment_cache_dir = feature_dir / f"features_aug"
+
+    print(f"Dataset: {args.dataset}")
+    print(f"Pooling: {args.pooling}")
+    print(f"Layer: {args.layer}")
+    print(f"Augmentation: {args.augment}")
 
     df = pd.read_csv(dataset_dir / "manifest.csv")
     train_df = df[df["split"] == "train"].reset_index(drop=True)
@@ -166,7 +314,27 @@ def main():
         mert,
         device,
         cache_dir,
+        args.pooling,
+        args.layer,
+        args.acoustic,
     )
+
+    if args.augment:
+        print("\nExtracting AUGMENTED TRAIN features")
+        X_aug, y_aug = extract_augmented_split(
+            train_df,
+            dataset_dir,
+            processor,
+            mert,
+            device,
+            augment_cache_dir,
+            args.pooling,
+            args.layer,
+            args.acoustic,
+        )
+
+        X_train = np.concatenate([X_train, X_aug], axis=0)
+        y_train = np.concatenate([y_train, y_aug], axis=0)
 
     print("\nExtracting VALIDATION features")
     X_val, y_val, _ = extract_split(
@@ -176,6 +344,9 @@ def main():
         mert,
         device,
         cache_dir,
+        args.pooling,
+        args.layer,
+        args.acoustic
     )
 
     print("\nFeature shape:", X_train.shape)
@@ -252,6 +423,11 @@ def main():
     joblib.dump(classifier, model_path)
 
     metrics = {
+        "dataset": args.dataset,
+        "pooling": args.pooling,
+        "layer": args.layer,
+        "augmentation": args.augment,
+        "acoustic": args.acoustic,
         "c": best_c,
         "train_top1": float(train_top1),
         "train_top3": float(train_top3),
@@ -261,6 +437,8 @@ def main():
         "classes": classes.tolist(),
     }
 
+    if args.augment:
+        metrics["crop_seconds"] = CROP_SECONDS
     metrics_path = output_dir / "metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
