@@ -14,7 +14,7 @@ from pathlib import Path
 from tqdm import tqdm
 from transformers import AutoModel, Wav2Vec2FeatureExtractor
 from sklearn.preprocessing import StandardScaler, Normalizer
-from sklearn.svm import LinearSVC
+from sklearn.svm import LinearSVC, SVC
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 
@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--layer", default="last")
     parser.add_argument("--augment", action="store_true")
     parser.add_argument("--acoustic", action="store_true")
+    parser.add_argument("--vocal", action="store_true")
     return parser.parse_args()
 
 def load_audio(path):
@@ -271,10 +272,15 @@ def main():
     if args.layer != "last" and not 0 <= int(args.layer) <= 24:
         raise ValueError("Layer must be last or between 0 and 24")
 
+    if args.vocal and args.dataset != "B":
+        raise ValueError("--vocal can only be used with dataset B")
+
     mert_model = MERT_MODEL
 
     dataset_dir = Path(f"data/dataset_{args.dataset}")
-    feature_dir = Path(f"outputs/{args.dataset}/{args.pooling}_{args.layer}" + ("_aug" if args.augment else "") + ("_acoustic" if args.acoustic else ""))
+    if args.vocal:
+        vocal_dir = Path("data/dataset_C")
+    feature_dir = Path(f"outputs/{args.dataset}/{args.pooling}_{args.layer}" + ("_aug" if args.augment else "") + ("_acoustic" if args.acoustic else "") + ("_vocal" if args.vocal else ""))
 
     output_dir = feature_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -319,6 +325,21 @@ def main():
         args.acoustic,
     )
 
+    if args.vocal:
+        vocal_cache_dir = feature_dir / "features_vocal"
+        X_train_vocal, _, _ = extract_split(
+            train_df,
+            vocal_dir,
+            processor,
+            mert,
+            device,
+            vocal_cache_dir,
+            args.pooling,
+            args.layer,
+            False,
+        )
+        X_train = np.concatenate([X_train, X_train_vocal], axis=1)
+
     if args.augment:
         print("\nExtracting AUGMENTED TRAIN features")
         X_aug, y_aug = extract_augmented_split(
@@ -332,6 +353,21 @@ def main():
             args.layer,
             args.acoustic,
         )
+
+        if args.vocal:
+            vocal_augment_cache_dir = feature_dir / "features_aug_vocal"
+            X_aug_vocal, _ = extract_augmented_split(
+                train_df,
+                vocal_dir,
+                processor,
+                mert,
+                device,
+                vocal_augment_cache_dir,
+                args.pooling,
+                args.layer,
+                False,
+            )
+            X_aug = np.concatenate([X_aug, X_aug_vocal], axis=1)
 
         X_train = np.concatenate([X_train, X_aug], axis=0)
         y_train = np.concatenate([y_train, y_aug], axis=0)
@@ -349,6 +385,20 @@ def main():
         args.acoustic
     )
 
+    if args.vocal:
+        X_val_vocal, _, _ = extract_split(
+            val_df,
+            vocal_dir,
+            processor,
+            mert,
+            device,
+            vocal_cache_dir,
+            args.pooling,
+            args.layer,
+            False,
+        )
+        X_val = np.concatenate([X_val, X_val_vocal], axis=1)
+
     print("\nFeature shape:", X_train.shape)
 
     del mert
@@ -361,13 +411,19 @@ def main():
     best_c = None
     best_top = -1
 
-    C = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.5, 1.0]
+    C = [0.005, 0.0065, 0.008, 0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.5, 1.0]
     for c in C:
-        steps = [
-            ("scaler", StandardScaler()),
-            ("norm", Normalizer(norm="l2")),
-            ("svm", LinearSVC(C=c, penalty="l2", dual="auto", class_weight="balanced", max_iter=10000, random_state=RANDOM_SEED))
-        ]
+        if args.dataset == "A":
+            steps = [
+                ("scaler", StandardScaler()),
+                ("norm", Normalizer(norm="l2")),
+                ("svm", LinearSVC(C=c, penalty="l2", dual="auto", class_weight="balanced", max_iter=10000, random_state=RANDOM_SEED))
+            ]
+        else:
+            steps = [
+                ("scaler", StandardScaler()),
+                ("svm", SVC(kernel="linear", C=c))
+            ]
 
         classifier = Pipeline(steps)
         classifier.fit(X_train, y_train)
