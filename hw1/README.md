@@ -1,9 +1,9 @@
-# Music Era and Release Country Classification
+# Music Release-Decade and Release-Market Classification
 
 This project performs two music classification tasks using audio features extracted from **MERT**:
 
-- **Era Classification**: predicts the release era of a song (e.g., 1960s, 1970s, ..., 2010s).
-- **Release Country Classification**: predicts the country where a song was released.
+- **Release-Decade Classification**: predicts the release decade of a song.
+- **Release-Market Classification**: predicts the release market of a song.
 
 ## Environment Setup
 
@@ -36,8 +36,8 @@ data/
         └── ... .wav
 ```
 
-- **Dataset A** is used for **music era classification**.
-- **Dataset B** is used for **release country classification**.
+- **Dataset A** is used for **release-decade classification**.
+- **Dataset B** is used for **release-market classification**.
 
 To extract the vocal parts from Dataset B, run:
 
@@ -59,8 +59,8 @@ python3 train.py [OPTIONS]
 
 - `--dataset A/B`  
   Select the dataset and classification task:
-  - `A`: music era classification
-  - `B`: release country classification
+  - `A`: release-decade classification
+  - `B`: release-market classification
 
 - `--pooling mean/meanstd`  
   Select the pooling method for MERT features.
@@ -83,13 +83,13 @@ python3 train.py [OPTIONS]
 
 To reproduce the submitted models, run:
 
-### Dataset A — Era Classification
+### Dataset A — Release-Decade Classification
 
 ```bash
 python3 train.py --dataset A --pooling meanstd --acoustic
 ```
 
-### Dataset B — Release Country Classification
+### Dataset B — Release-Market Classification
 
 ```bash
 python3 train.py --dataset B --pooling mean --layer 6 --augment
@@ -112,3 +112,20 @@ To generate the line charts used in the report:
 python3 draw_A.py
 python3 draw_B.py
 ```
+
+## Prediction
+
+To generate predictions using the submitted models, run:
+
+```bash
+python3 predict.py
+```
+
+The prediction script uses the following trained models:
+
+```text
+Dataset A: outputs/A/meanstd_last_acoustic
+Dataset B: outputs/B/mean_6_aug
+```
+
+The predictions are saved to `outputs/b12901024.json`.
