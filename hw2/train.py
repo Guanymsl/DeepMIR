@@ -88,6 +88,7 @@ def run_epoch(model, loader, optimizer, device, train, grad_clip):
 TOKENS_PATH = Path("outputs/tokens/remi/tokens.json")
 TOKENIZER_PATH = Path("outputs/tokens/remi/tokenizer.json")
 OUTPUT_DIR = Path("outputs/checkpoints/remi")
+
 CONTEXT_LENGTH = 1024
 SAMPLES_PER_SONG = 16
 VAL_SAMPLES_PER_SONG = 4

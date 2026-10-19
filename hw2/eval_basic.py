@@ -1,11 +1,3 @@
-"""
-Install the following dependencies before running this script:
-- numpy
-- pandas
-- tqdm
-- MusDr (https://github.com/slSeanWU/MusDr)
-"""
-
 import json
 import argparse
 import numpy as np
@@ -28,9 +20,6 @@ def parse_args():
     return parser.parse_args()
 
 def compute_piece_pitch_entropy(piece_ev_seq, window_size, bar_ev_id, pitch_evs):
-    """
-    For calculating H1 and H4
-    """
     if piece_ev_seq[-1] == bar_ev_id:
         piece_ev_seq = piece_ev_seq[:-1]
 
@@ -106,7 +95,6 @@ if __name__ == "__main__":
     for item in tqdm(generated_data):
         song_name = item["song_name"]
 
-        # Convert tokens to indcies
         seq_ids = [tok2idx[tok] for tok in item["tokens"] if tok in tok2idx]
 
         result_dict['song_name'].append(song_name)
@@ -125,7 +113,6 @@ if __name__ == "__main__":
         df.to_csv(args.output_csv, index=False, encoding='utf-8')
         print(f"\nEvaluation complete! Results saved to {args.output_csv}")
 
-        # Output Average Summary
         print(f"Average H1: {df['H1 (Pitch Entropy 1-Bar)'].mean():.4f}")
         print(f"Average H4: {df['H4 (Pitch Entropy 4-Bar)'].mean():.4f}")
         print(f"Average GS: {df['GS (Groove Similarity)'].mean():.4f}")
