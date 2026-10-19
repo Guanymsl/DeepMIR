@@ -6,6 +6,7 @@ symusic
 torch
 pretty_midi
 mido
+transformers
 
 #pandas
 #MusDr
