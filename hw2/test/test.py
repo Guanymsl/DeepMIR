@@ -1,15 +1,11 @@
-
 from pathlib import Path
-
 from miditok import REMI
 from symusic import Track
 
 from tokenization_corrected import corrected_score
 
-
 TOKENIZER_PATH = Path("outputs/tokens/remi/tokenizer.json")
 PROMPT_DIR = Path("data/POP909/prompts/basic-b")
-
 
 def main():
     tokenizer = REMI(params=TOKENIZER_PATH)
@@ -63,7 +59,6 @@ def main():
             f"expected=8, "
             f"match={bars == 8}"
         )
-
 
 if __name__ == "__main__":
     main()

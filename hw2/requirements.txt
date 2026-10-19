@@ -5,6 +5,7 @@ miditok
 symusic
 torch
 pretty_midi
+mido
 
 #pandas
 #MusDr
