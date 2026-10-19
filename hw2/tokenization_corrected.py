@@ -11,7 +11,7 @@ from miditok import CPWord, REMI, TokenizerConfig
 from symusic import Score, Track
 from tqdm import tqdm
 
-PPQ = 480
+PPQ = 1920
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -33,16 +33,33 @@ def beat_meter(beat_path):
     return [(times[a], b - a) for a, b in zip(downbeats, downbeats[1:])]
 
 def beat_offset(times, downbeats=None):
-    # Keep the first annotated beat at its original time, while placing the
-    # first downbeat on a whole-bar boundary of the opening meter.
-    minimum = max(0, math.ceil(times[0] / (times[1] - times[0])))
+    # Choose the smallest *bar-aligned* offset that can represent the
+    # first beat's timestamp with a legal MIDI initial tempo.
+    # Using a higher PPQ also reduces note-time rounding errors.
+    first_time = times[0]
+    if first_time < 0:
+        raise ValueError('Negative first beat time')
     if not downbeats or len(downbeats) < 2:
-        return minimum * PPQ
-    first_meter = downbeats[1] - downbeats[0]
-    if first_meter <= 0:
+        return max(0, round(first_time / (times[1] - first_time) * PPQ))
+    meter = downbeats[1] - downbeats[0]
+    if meter <= 0:
         raise ValueError('Invalid opening meter')
-    extra = (-(minimum + downbeats[0])) % first_meter
-    return (minimum + extra) * PPQ
+    bar_ticks = meter * PPQ
+    # First downbeat must fall on a complete bar boundary.
+    remainder = (-downbeats[0] * PPQ) % bar_ticks
+    # Tempo is in microseconds per quarter note, max 0xFFFFFF.
+    min_ticks = math.ceil(first_time * 1_000_000 * PPQ / 0xFFFFFF)
+    # The original first-beat interval is a good reference for the
+    # pre-roll tempo; choose the nearest legal aligned offset.
+    target = round(first_time / (times[1] - first_time) * PPQ)
+    k = max(0, math.ceil((min_ticks - remainder) / bar_ticks))
+    candidates = [remainder + j * bar_ticks for j in (k, k + 1, max(k, round((target - remainder) / bar_ticks)))]
+    candidates = [x for x in candidates if x >= min_ticks and x > 0]
+    if first_time == 0:
+        # Zero seconds cannot be encoded by positive ticks at legal tempo.
+        # Preserve exact audio time rather than fabricate a pre-roll.
+        return 0
+    return min(candidates, key=lambda x: (abs(x - target), x))
 
 def second_to_tick(t, times, offset=0):
     i = max(0, min(bisect_right(times, t) - 1, len(times) - 2))
