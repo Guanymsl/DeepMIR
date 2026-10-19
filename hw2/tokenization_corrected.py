@@ -32,7 +32,7 @@ def beat_meter(beat_path):
     times, downbeats = read_beats(beat_path)
     return [(times[a], b - a) for a, b in zip(downbeats, downbeats[1:])]
 
-def beat_offset(times, downbeats=None):
+def beat_offset(times, downbeats=None, earliest_time=None):
     # Choose the smallest *bar-aligned* offset that can represent the
     # first beat's timestamp with a legal MIDI initial tempo.
     # Using a higher PPQ also reduces note-time rounding errors.
@@ -49,6 +49,10 @@ def beat_offset(times, downbeats=None):
     remainder = (-downbeats[0] * PPQ) % bar_ticks
     # Tempo is in microseconds per quarter note, max 0xFFFFFF.
     min_ticks = math.ceil(first_time * 1_000_000 * PPQ / 0xFFFFFF)
+    # Reserve space for events occurring before the first annotated beat.
+    # Such events are encoded using the initial tempo, not the first beat interval.
+    if earliest_time is not None and first_time > 0:
+        min_ticks = max(min_ticks, math.ceil(first_time * PPQ / (times[1] - first_time))) if earliest_time <= 0 else min_ticks
     # The original first-beat interval is a good reference for the
     # pre-roll tempo; choose the nearest legal aligned offset.
     target = round(first_time / (times[1] - first_time) * PPQ)
@@ -62,6 +66,11 @@ def beat_offset(times, downbeats=None):
     return min(candidates, key=lambda x: (abs(x - target), x))
 
 def second_to_tick(t, times, offset=0):
+    if t < times[0] and times[0] > 0 and offset > 0:
+        # Before the first beat, MIDI playback follows the initial tempo.
+        # Map absolute seconds to this tempo segment rather than extrapolating
+        # the following beat interval (which can yield negative ticks).
+        return max(0, round(t / times[0] * offset))
     i = max(0, min(bisect_right(times, t) - 1, len(times) - 2))
     return max(0, offset + round((i + (t - times[i]) / (times[i + 1] - times[i])) * PPQ))
 
