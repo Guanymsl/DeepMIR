@@ -1,22 +1,16 @@
-import argparse
 import json
-import tempfile
 import math
 import pretty_midi
 import mido
+import tempfile
 
 from pathlib import Path
-from bisect import bisect_right
-from miditok import CPWord, REMI, TokenizerConfig
-from symusic import Score, Track
+from miditok import REMI, TokenizerConfig
 from tqdm import tqdm
+from bisect import bisect_right
+from symusic import Score, Track
 
 PPQ = 1920
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--type', required=True, choices=['remi', 'cpword'])
-    return parser.parse_args()
 
 def read_beats(beat_path):
     times, downbeats = [], []
@@ -33,52 +27,35 @@ def beat_meter(beat_path):
     return [(times[a], b - a) for a, b in zip(downbeats, downbeats[1:])]
 
 def beat_offset(times, downbeats=None, earliest_time=None):
-    # Choose the smallest *bar-aligned* offset that can represent the
-    # first beat's timestamp with a legal MIDI initial tempo.
-    # Using a higher PPQ also reduces note-time rounding errors.
     first_time = times[0]
-    if first_time < 0:
-        raise ValueError('Negative first beat time')
     if not downbeats or len(downbeats) < 2:
         return max(0, round(first_time / (times[1] - first_time) * PPQ))
+
     meter = downbeats[1] - downbeats[0]
-    if meter <= 0:
-        raise ValueError('Invalid opening meter')
     bar_ticks = meter * PPQ
-    # First downbeat must fall on a complete bar boundary.
     remainder = (-downbeats[0] * PPQ) % bar_ticks
-    # Tempo is in microseconds per quarter note, max 0xFFFFFF.
+
     min_ticks = math.ceil(first_time * 1_000_000 * PPQ / 0xFFFFFF)
-    # Reserve space for events occurring before the first annotated beat.
-    # Such events are encoded using the initial tempo, not the first beat interval.
     if earliest_time is not None and first_time > 0:
         min_ticks = max(min_ticks, math.ceil(first_time * PPQ / (times[1] - first_time))) if earliest_time <= 0 else min_ticks
-    # The original first-beat interval is a good reference for the
-    # pre-roll tempo; choose the nearest legal aligned offset.
+
     target = round(first_time / (times[1] - first_time) * PPQ)
     k = max(0, math.ceil((min_ticks - remainder) / bar_ticks))
     candidates = [remainder + j * bar_ticks for j in (k, k + 1, max(k, round((target - remainder) / bar_ticks)))]
     candidates = [x for x in candidates if x >= min_ticks and x > 0]
+
     if first_time == 0:
-        # A zero-time first beat can still need an initial pickup. Place it
-        # at an aligned beat using a near-zero-duration MIDI pre-roll.
-        # This avoids relying on MidiTok's handling of a short opening TS.
         return remainder
     return min(candidates, key=lambda x: (abs(x - target), x))
 
 def second_to_tick(t, times, offset=0):
     if t < times[0] and times[0] > 0 and offset > 0:
-        # Before the first beat, MIDI playback follows the initial tempo.
-        # Map absolute seconds to this tempo segment rather than extrapolating
-        # the following beat interval (which can yield negative ticks).
         return max(0, round(t / times[0] * offset))
     i = max(0, min(bisect_right(times, t) - 1, len(times) - 2))
     return max(0, offset + round((i + (t - times[i]) / (times[i + 1] - times[i])) * PPQ))
 
 def corrected_score(midi_path, beat_path):
     times, downbeats = read_beats(beat_path)
-    if len(times) < 2 or any(b <= a for a, b in zip(times, times[1:])):
-        raise ValueError(f"Invalid beats: {beat_path}")
     offset = beat_offset(times, downbeats)
     midi = pretty_midi.PrettyMIDI(str(midi_path))
     out = mido.MidiFile(ticks_per_beat=PPQ)
@@ -86,50 +63,31 @@ def corrected_score(midi_path, beat_path):
     meta = mido.MidiTrack()
     out.tracks.append(meta)
     if offset and times[0] == 0:
-        # MIDI cannot represent a truly zero-second positive tick offset.
-        # One microsecond per quarter introduces at most a few microseconds
-        # of leading time while preserving the full-bar MIDI grid.
         initial_tempo = 1
     else:
         initial_tempo = round(times[0] * 1_000_000 * PPQ / offset) if offset else round((times[1] - times[0]) * 1_000_000)
-    if not 1 <= initial_tempo <= 0xFFFFFF:
-        raise ValueError(f"Invalid initial tempo: {beat_path}")
     events = [(0, 0, mido.MetaMessage('set_tempo', tempo=initial_tempo))]
 
     for i, (start, end) in enumerate(zip(times, times[1:])):
         tempo = round((end - start) * 1_000_000)
-        if not 1 <= tempo <= 0xFFFFFF:
-            raise ValueError(f"Invalid tempo: {beat_path}")
         events.append((offset + i * PPQ, 0, mido.MetaMessage('set_tempo', tempo=tempo)))
 
     meters = [(a, b - a) for a, b in zip(downbeats, downbeats[1:])]
     if meters:
         first_downbeat, first_meter = meters[0]
-        # Only use a short opening meter if there is genuinely no offset.
-        # Normally the beat_offset() aligns the first downbeat on the grid.
+
         if offset == 0 and first_downbeat > 0:
-            if first_downbeat > 16:
-                raise ValueError(f"Unsupported pickup length: {beat_path}")
-            events.append((0, 1, mido.MetaMessage(
-                'time_signature', numerator=first_downbeat, denominator=4
-            )))
-            events.append((first_downbeat * PPQ, 1, mido.MetaMessage(
-                'time_signature', numerator=first_meter, denominator=4
-            )))
+            events.append((0, 1, mido.MetaMessage('time_signature', numerator=first_downbeat, denominator=4)))
+            events.append((first_downbeat * PPQ, 1, mido.MetaMessage('time_signature', numerator=first_meter, denominator=4)))
         else:
-            events.append((0, 1, mido.MetaMessage(
-                'time_signature', numerator=first_meter, denominator=4
-            )))
+            events.append((0, 1, mido.MetaMessage('time_signature', numerator=first_meter, denominator=4)))
             if offset + first_downbeat * PPQ > 0:
-                events.append((offset + first_downbeat * PPQ, 1, mido.MetaMessage(
-                    'time_signature', numerator=first_meter, denominator=4
-                )))
+                events.append((offset + first_downbeat * PPQ, 1, mido.MetaMessage('time_signature', numerator=first_meter, denominator=4)))
+
         last_meter = first_meter
         for beat_index, numerator in meters[1:]:
             if numerator != last_meter:
-                events.append((offset + beat_index * PPQ, 1, mido.MetaMessage(
-                    'time_signature', numerator=numerator, denominator=4
-                )))
+                events.append((offset + beat_index * PPQ, 1, mido.MetaMessage('time_signature', numerator=numerator, denominator=4)))
                 last_meter = numerator
 
     def add_events(track, entries):
@@ -148,26 +106,20 @@ def corrected_score(midi_path, beat_path):
         channel = 9 if instrument.is_drum else channel_index % 15
         if not instrument.is_drum and channel >= 9:
             channel += 1
-        instrument_events = [(0, 0, mido.Message(
-            'program_change', channel=channel, program=instrument.program
-        ))]
+        instrument_events = [(0, 0, mido.Message('program_change', channel=channel, program=instrument.program))]
+
         for note in instrument.notes:
             start = second_to_tick(note.start, times, offset)
             end = max(start + 1, second_to_tick(note.end, times, offset))
-            instrument_events.append((start, 2, mido.Message(
-                'note_on', channel=channel, note=note.pitch, velocity=note.velocity
-            )))
-            instrument_events.append((end, 1, mido.Message(
-                'note_off', channel=channel, note=note.pitch, velocity=0
-            )))
+            instrument_events.append((start, 2, mido.Message('note_on', channel=channel, note=note.pitch, velocity=note.velocity)))
+            instrument_events.append((end, 1, mido.Message('note_off', channel=channel, note=note.pitch, velocity=0)))
+
         for cc in instrument.control_changes:
-            instrument_events.append((second_to_tick(cc.time, times, offset), 1, mido.Message(
-                'control_change', channel=channel, control=cc.number, value=cc.value
-            )))
+            instrument_events.append((second_to_tick(cc.time, times, offset), 1, mido.Message('control_change', channel=channel, control=cc.number, value=cc.value)))
+
         for bend in instrument.pitch_bends:
-            instrument_events.append((second_to_tick(bend.time, times, offset), 1, mido.Message(
-                'pitchwheel', channel=channel, pitch=bend.pitch
-            )))
+            instrument_events.append((second_to_tick(bend.time, times, offset), 1, mido.Message('pitchwheel', channel=channel, pitch=bend.pitch)))
+
         add_events(track, instrument_events)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -181,9 +133,10 @@ def corrected_score(midi_path, beat_path):
         if numerator != previous_meter:
             changes.append((numerator, 4, times[index]))
             previous_meter = numerator
+
     return score, changes
 
-def create(kind, meters):
+def create(meters):
     config = TokenizerConfig(
         pitch_range=(21, 109),
         beat_res={(0, 4): 16},
@@ -194,25 +147,23 @@ def create(kind, meters):
         use_programs=False,
         use_chords=False,
     )
-    return (REMI if kind == 'remi' else CPWord)(config)
+    return REMI(config)
 
 def normalize(encoded):
     return encoded if isinstance(encoded, list) else [encoded]
 
 def main():
-    args = parse_args()
-
     dataset = Path('data/POP909/training')
-    dest = Path('outputs/tokens') / args.type
+    dest = Path('outputs/tokens')
     files = sorted((d.name, d / f'{d.name}.mid', d / 'beat_midi.txt') for d in dataset.iterdir() if d.is_dir())
 
     meters = {n for _, _, beat in files for _, n in beat_meter(beat)}
-    tokenizer = create(args.type, meters)
+    tokenizer = create(meters)
     dest.mkdir(parents=True, exist_ok=True)
     tokenizer.save(dest / 'tokenizer.json')
 
     results = []
-    for name, midi, beat in tqdm(files, desc=f'Tokenizing {args.type.upper()}', unit='song'):
+    for name, midi, beat in tqdm(files, desc=f'Tokenizing', unit='song'):
         score, _ = corrected_score(midi, beat)
 
         merged = Track(program=0, is_drum=False, name='PIANO_MERGED')

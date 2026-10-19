@@ -1,20 +1,17 @@
-import csv
-import json
-from collections import Counter
-from pathlib import Path
-
-import numpy as np
 import pretty_midi
-from miditok import REMI
-from symusic import Track
-from tqdm import tqdm
+import numpy as np
 
-from tokenization_corrected import corrected_score, read_beats, beat_offset, beat_meter, create, PPQ
+from pathlib import Path
+from tqdm import tqdm
+from collections import Counter
+from symusic import Track
+
+from tokenization import corrected_score, read_beats, beat_offset, beat_meter, create, PPQ
 
 DATA_DIR = Path('data/POP909/training')
-TOKENIZER_PATH = Path('outputs/tokens/remi/tokenizer.json')
-OUTPUT_DIR = Path('outputs')
+TOKENIZER_PATH = Path('outputs/tokens/tokenizer.json')
 PROMPTS_DIR = Path('data/POP909/prompts/basic-b')
+
 MAX_TIME_ERROR_MS = 2.0
 MAX_BEAT_ERROR_MS = 2.0
 MAX_BAR_DIFFERENCE = 1
@@ -27,14 +24,12 @@ FIELDS = [
     'meters', 'tempo_events', 'max_beat_error_ms', 'bar_alignment_ok', 'issues',
 ]
 
-
 def get_original_notes(midi):
     return sorted(
         (n.pitch, n.velocity, n.start, n.end)
         for inst in midi.instruments if not inst.is_drum
         for n in inst.notes
     )
-
 
 def get_corrected_notes(score):
     seconds = score.to('second', min_dur=0.000001)
@@ -43,7 +38,6 @@ def get_corrected_notes(score):
         for track in seconds.tracks if not track.is_drum
         for n in track.notes
     )
-
 
 def compare_notes(original, score, result, issues):
     a = get_original_notes(original)
@@ -72,7 +66,6 @@ def compare_notes(original, score, result, issues):
     if ends.max() > MAX_TIME_ERROR_MS:
         issues.append('END_TIME_ERROR')
 
-
 def tick_to_seconds(tick, score):
     tpq = score.ticks_per_quarter
     events = sorted(score.tempos, key=lambda e: e.time)
@@ -83,7 +76,6 @@ def tick_to_seconds(tick, score):
         seconds += (event.time - last_tick) * 60.0 / (tpq * bpm)
         last_tick, bpm = event.time, event.qpm
     return seconds + (tick - last_tick) * 60.0 / (tpq * bpm)
-
 
 def compare_beats(score, times, result, issues):
     result['tempo_events'] = len(score.tempos)
@@ -98,7 +90,6 @@ def compare_beats(score, times, result, issues):
     result['max_beat_error_ms'] = float(max(errors))
     if max(errors) > MAX_BEAT_ERROR_MS:
         issues.append('BEAT_TIME_ERROR')
-
 
 def compare_meters(score, downbeats, result, issues):
     meters = [(a, b - a) for a, b in zip(downbeats, downbeats[1:])]
@@ -126,11 +117,7 @@ def compare_meters(score, downbeats, result, issues):
             issues.append('TIME_SIGNATURE_MISMATCH')
             return
 
-
 def compare_bar_alignment(score, downbeats, result, issues):
-    # Check downbeat tick positions against the meter grid, including pickup.
-    # This validates the corrected MIDI's meter geometry, not MidiTok's
-    # internal Bar_None emission. Count differences remain diagnostic only.
     meters = [(a, b - a) for a, b in zip(downbeats, downbeats[1:])]
     offset = result['_offset']
     signatures = sorted(score.time_signatures, key=lambda e: e.time)
@@ -147,11 +134,9 @@ def compare_bar_alignment(score, downbeats, result, issues):
                 break
         if active is None or (active.numerator, active.denominator) != (numerator, 4):
             aligned = False
-        # Each pair of annotated downbeats must span one bar of this meter.
     result['bar_alignment_ok'] = aligned
     if not aligned:
         issues.append('BAR_ALIGNMENT_ERROR')
-
 
 def tokenize(score, tokenizer, result, issues):
     merged = Track(program=0, is_drum=False, name='PIANO_MERGED')
@@ -167,12 +152,10 @@ def tokenize(score, tokenizer, result, issues):
     result['token_bars'] = tokens.count('Bar_None')
     result['unknown_tokens'] = sum('UNK' in token.upper() for token in tokens)
     result['bar_difference'] = result['token_bars'] - result['expected_bars']
-    # Difference in counts alone is not a structural alignment error.
     if result['unknown_tokens']:
         issues.append('UNKNOWN_TOKENS')
     if not tokens:
         issues.append('EMPTY_TOKENS')
-
 
 def check_song(folder, tokenizer):
     name = folder.name
@@ -181,15 +164,7 @@ def check_song(folder, tokenizer):
     result = {field: None for field in FIELDS}
     result['song'] = name
     issues = []
-    if not midi_path.is_file() or not beat_path.is_file():
-        raise FileNotFoundError(f'Missing MIDI or beats in {folder}')
     times, downbeats = read_beats(beat_path)
-    if len(times) < 2 or len(downbeats) < 2:
-        raise ValueError('Insufficient beats/downbeats')
-    if any(b <= a for a, b in zip(times, times[1:])):
-        raise ValueError('Non-increasing beat timestamps')
-    if any(i < 0 or i >= len(times) for i in downbeats):
-        raise ValueError('Invalid downbeat index')
     result['first_beat_s'] = times[0]
     result['first_downbeat_index'] = downbeats[0]
     result['expected_bars'] = len(downbeats) - 1
@@ -205,10 +180,7 @@ def check_song(folder, tokenizer):
     result['issues'] = ';'.join(issues)
     return result
 
-
-
 def check_prompts(tokenizer):
-    """Check Task B prompts using the SAME correction and tokenizer as training."""
     results = []
     print('\n===== Task B Prompts (expected 8 bars) =====')
     for name in ('001', '002', '003'):
@@ -224,7 +196,7 @@ def check_prompts(tokenizer):
                 raise FileNotFoundError(
                     f'Missing beat annotations: {beat_path}; cannot safely correct this prompt'
                 )
-            times, downbeats = read_beats(beat_path)
+            _, downbeats = read_beats(beat_path)
             row['first_downbeat_index'] = downbeats[0] if downbeats else None
             score, _ = corrected_score(midi_path, beat_path)
             issues = []
@@ -252,16 +224,12 @@ def check_prompts(tokenizer):
         results.append(row)
         print(f"{name}: {row['status']} | bars={row['bars']} | "
               f"tokens={row['tokens']} | {row['issues'] or 'OK'}")
-    path = OUTPUT_DIR / 'check_prompts.json'
-    path.write_text(json.dumps(results, indent=2), encoding='utf-8')
-    print('Prompts:', path)
     return results
 
 def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     folders = sorted(d for d in DATA_DIR.iterdir() if d.is_dir())
     meters = {n for folder in folders for _, n in beat_meter(folder / 'beat_midi.txt')}
-    tokenizer = create('remi', meters)
+    tokenizer = create(meters)
     results = []
     for folder in tqdm(folders, desc='Checking POP909'):
         try:
@@ -270,11 +238,6 @@ def main():
             result = {field: None for field in FIELDS}
             result.update(song=folder.name, status='ERROR', issues=f'{type(exc).__name__}: {exc}')
         results.append(result)
-    csv_path = OUTPUT_DIR / 'check_dataset.csv'
-    with csv_path.open('w', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=FIELDS, extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(results)
     statuses = Counter(r['status'] for r in results)
     issues = Counter()
     for result in results:
@@ -285,8 +248,6 @@ def main():
         'warning': statuses['WARNING'], 'error': statuses['ERROR'],
         'issues': dict(issues),
     }
-    summary_path = OUTPUT_DIR / 'check_dataset_summary.json'
-    summary_path.write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print('\n===== Summary =====')
     for key in ('total', 'pass', 'warning', 'error'):
         print(f'{key}: {summary[key]}')
@@ -299,10 +260,7 @@ def main():
         print(result['song'], result['status'], result['issues'])
     if len(problems) > 50:
         print(f'... and {len(problems) - 50} more')
-    print('\nCSV:', csv_path)
-    print('Summary:', summary_path)
     check_prompts(tokenizer)
-
 
 if __name__ == '__main__':
     main()
