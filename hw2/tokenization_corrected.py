@@ -1,6 +1,7 @@
 import argparse
 import json
 import tempfile
+import math
 import pretty_midi
 import mido
 
@@ -31,28 +32,52 @@ def beat_meter(beat_path):
     times, downbeats = read_beats(beat_path)
     return [(times[a], b - a) for a, b in zip(downbeats, downbeats[1:])]
 
-def second_to_tick(t, times):
+def beat_offset(times, downbeats=None):
+    # Keep the first annotated beat at its original time, while placing the
+    # first downbeat on a whole-bar boundary of the opening meter.
+    minimum = max(0, math.ceil(times[0] / (times[1] - times[0])))
+    if not downbeats or len(downbeats) < 2:
+        return minimum * PPQ
+    first_meter = downbeats[1] - downbeats[0]
+    if first_meter <= 0:
+        raise ValueError('Invalid opening meter')
+    extra = (-(minimum + downbeats[0])) % first_meter
+    return (minimum + extra) * PPQ
+
+def second_to_tick(t, times, offset=0):
     i = max(0, min(bisect_right(times, t) - 1, len(times) - 2))
-    return max(0, round((i + (t - times[i]) / (times[i + 1] - times[i])) * PPQ))
+    return max(0, offset + round((i + (t - times[i]) / (times[i + 1] - times[i])) * PPQ))
 
 def corrected_score(midi_path, beat_path):
     times, downbeats = read_beats(beat_path)
+    if len(times) < 2 or any(b <= a for a, b in zip(times, times[1:])):
+        raise ValueError(f"Invalid beats: {beat_path}")
+    offset = beat_offset(times, downbeats)
     midi = pretty_midi.PrettyMIDI(str(midi_path))
     out = mido.MidiFile(ticks_per_beat=PPQ)
 
     meta = mido.MidiTrack()
     out.tracks.append(meta)
-    events = []
+    initial_tempo = round(times[0] * 1_000_000 * PPQ / offset) if offset else round((times[1] - times[0]) * 1_000_000)
+    if not 1 <= initial_tempo <= 0xFFFFFF:
+        raise ValueError(f"Invalid initial tempo: {beat_path}")
+    events = [(0, 0, mido.MetaMessage('set_tempo', tempo=initial_tempo))]
 
     for i, (start, end) in enumerate(zip(times, times[1:])):
         tempo = round((end - start) * 1_000_000)
-        events.append((i * PPQ, 0, mido.MetaMessage('set_tempo', tempo=tempo)))
+        if not 1 <= tempo <= 0xFFFFFF:
+            raise ValueError(f"Invalid tempo: {beat_path}")
+        events.append((offset + i * PPQ, 0, mido.MetaMessage('set_tempo', tempo=tempo)))
 
     meters = [(a, b - a) for a, b in zip(downbeats, downbeats[1:])]
+    if meters:
+        events.append((0, 1, mido.MetaMessage(
+            'time_signature', numerator=meters[0][1], denominator=4
+        )))
     last_meter = None
     for beat_index, numerator in meters:
-        if numerator != last_meter:
-            events.append((beat_index * PPQ, 1, mido.MetaMessage(
+        if numerator != last_meter and offset + beat_index * PPQ != 0:
+            events.append((offset + beat_index * PPQ, 1, mido.MetaMessage(
                 'time_signature', numerator=numerator, denominator=4
             )))
             last_meter = numerator
@@ -77,8 +102,8 @@ def corrected_score(midi_path, beat_path):
             'program_change', channel=channel, program=instrument.program
         ))]
         for note in instrument.notes:
-            start = second_to_tick(note.start, times)
-            end = max(start + 1, second_to_tick(note.end, times))
+            start = second_to_tick(note.start, times, offset)
+            end = max(start + 1, second_to_tick(note.end, times, offset))
             instrument_events.append((start, 2, mido.Message(
                 'note_on', channel=channel, note=note.pitch, velocity=note.velocity
             )))
@@ -86,11 +111,11 @@ def corrected_score(midi_path, beat_path):
                 'note_off', channel=channel, note=note.pitch, velocity=0
             )))
         for cc in instrument.control_changes:
-            instrument_events.append((second_to_tick(cc.time, times), 1, mido.Message(
+            instrument_events.append((second_to_tick(cc.time, times, offset), 1, mido.Message(
                 'control_change', channel=channel, control=cc.number, value=cc.value
             )))
         for bend in instrument.pitch_bends:
-            instrument_events.append((second_to_tick(bend.time, times), 1, mido.Message(
+            instrument_events.append((second_to_tick(bend.time, times, offset), 1, mido.Message(
                 'pitchwheel', channel=channel, pitch=bend.pitch
             )))
         add_events(track, instrument_events)
@@ -113,7 +138,7 @@ def create(kind, meters):
         pitch_range=(21, 109),
         beat_res={(0, 4): 16},
         num_velocities=32,
-        use_tempos=True,
+        use_tempos=False,
         use_time_signatures=True,
         time_signature_range={4: sorted(meters)},
         use_programs=False,
