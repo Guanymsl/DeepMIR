@@ -4,3 +4,5 @@
 **/*.npy
 **/outputs/
 **/*.png
+**/__pycache__/
+**/soundfonts/
