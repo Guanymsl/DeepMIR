@@ -1,0 +1,10 @@
+numpy
+pathlib
+tqdm
+miditok
+symusic
+torch
+
+#pandas
+#MusDr
+#pretty_midi
