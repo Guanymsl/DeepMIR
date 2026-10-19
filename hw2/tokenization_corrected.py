@@ -60,9 +60,10 @@ def beat_offset(times, downbeats=None, earliest_time=None):
     candidates = [remainder + j * bar_ticks for j in (k, k + 1, max(k, round((target - remainder) / bar_ticks)))]
     candidates = [x for x in candidates if x >= min_ticks and x > 0]
     if first_time == 0:
-        # Zero seconds cannot be encoded by positive ticks at legal tempo.
-        # Preserve exact audio time rather than fabricate a pre-roll.
-        return 0
+        # A zero-time first beat can still need an initial pickup. Place it
+        # at an aligned beat using a near-zero-duration MIDI pre-roll.
+        # This avoids relying on MidiTok's handling of a short opening TS.
+        return remainder
     return min(candidates, key=lambda x: (abs(x - target), x))
 
 def second_to_tick(t, times, offset=0):
@@ -84,7 +85,13 @@ def corrected_score(midi_path, beat_path):
 
     meta = mido.MidiTrack()
     out.tracks.append(meta)
-    initial_tempo = round(times[0] * 1_000_000 * PPQ / offset) if offset else round((times[1] - times[0]) * 1_000_000)
+    if offset and times[0] == 0:
+        # MIDI cannot represent a truly zero-second positive tick offset.
+        # One microsecond per quarter introduces at most a few microseconds
+        # of leading time while preserving the full-bar MIDI grid.
+        initial_tempo = 1
+    else:
+        initial_tempo = round(times[0] * 1_000_000 * PPQ / offset) if offset else round((times[1] - times[0]) * 1_000_000)
     if not 1 <= initial_tempo <= 0xFFFFFF:
         raise ValueError(f"Invalid initial tempo: {beat_path}")
     events = [(0, 0, mido.MetaMessage('set_tempo', tempo=initial_tempo))]
@@ -97,16 +104,33 @@ def corrected_score(midi_path, beat_path):
 
     meters = [(a, b - a) for a, b in zip(downbeats, downbeats[1:])]
     if meters:
-        events.append((0, 1, mido.MetaMessage(
-            'time_signature', numerator=meters[0][1], denominator=4
-        )))
-    last_meter = None
-    for beat_index, numerator in meters:
-        if numerator != last_meter and offset + beat_index * PPQ != 0:
-            events.append((offset + beat_index * PPQ, 1, mido.MetaMessage(
-                'time_signature', numerator=numerator, denominator=4
+        first_downbeat, first_meter = meters[0]
+        # Only use a short opening meter if there is genuinely no offset.
+        # Normally the beat_offset() aligns the first downbeat on the grid.
+        if offset == 0 and first_downbeat > 0:
+            if first_downbeat > 16:
+                raise ValueError(f"Unsupported pickup length: {beat_path}")
+            events.append((0, 1, mido.MetaMessage(
+                'time_signature', numerator=first_downbeat, denominator=4
             )))
-            last_meter = numerator
+            events.append((first_downbeat * PPQ, 1, mido.MetaMessage(
+                'time_signature', numerator=first_meter, denominator=4
+            )))
+        else:
+            events.append((0, 1, mido.MetaMessage(
+                'time_signature', numerator=first_meter, denominator=4
+            )))
+            if offset + first_downbeat * PPQ > 0:
+                events.append((offset + first_downbeat * PPQ, 1, mido.MetaMessage(
+                    'time_signature', numerator=first_meter, denominator=4
+                )))
+        last_meter = first_meter
+        for beat_index, numerator in meters[1:]:
+            if numerator != last_meter:
+                events.append((offset + beat_index * PPQ, 1, mido.MetaMessage(
+                    'time_signature', numerator=numerator, denominator=4
+                )))
+                last_meter = numerator
 
     def add_events(track, entries):
         previous_tick = 0
