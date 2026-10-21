@@ -4,8 +4,8 @@ import subprocess
 from pathlib import Path
 from tqdm import tqdm
 
-INPUT_DIR = Path("outputs/generated/remi")
-OUTPUT_DIR = Path("outputs/rendered/remi")
+INPUT_DIR = Path("outputs/generated")
+OUTPUT_DIR = Path("outputs/rendered")
 SOUNDFONT_PATH = Path("soundfonts/FluidR3_GM.sf2")
 
 def parse_args():

@@ -5,15 +5,16 @@ import json
 
 from pathlib import Path
 from miditok import REMI
-from symusic import Score, Track
+from symusic import Track
 from tqdm import tqdm
+from transformers import GPT2Config, GPT2LMHeadModel
 
-from train import MusicTransformer
+from tokenization import corrected_score
 
-CHECKPOINT_PATH = Path("outputs/checkpoints/remi/best.pt")
-TOKENIZER_PATH = Path("outputs/tokens/remi/tokenizer.json")
+CHECKPOINT_PATH = Path("outputs/checkpoints/best.pt")
+TOKENIZER_PATH = Path("outputs/tokens/tokenizer.json")
 PROMPT_DIR = Path("data/POP909/prompts/basic-b")
-OUTPUT_DIR = Path("outputs/generated/remi")
+OUTPUT_DIR = Path("outputs/generated")
 
 SEED = 42
 SAMPLES = 20
@@ -30,7 +31,11 @@ def parse_args():
 
 def load_model(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    model = MusicTransformer(**checkpoint["model_config"])
+    config_dict = checkpoint["model_config"].copy()
+    config_dict["bos_token_id"] = None
+    config_dict["eos_token_id"] = None
+    config = GPT2Config.from_dict(config_dict)
+    model = GPT2LMHeadModel(config)
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(device).eval()
     print(f"Checkpoint: {checkpoint_path} | Device: {device}")
@@ -53,7 +58,9 @@ def merge_piano_tracks(score):
     return score
 
 def tokenize_prompt(tokenizer, midi_path):
-    score = merge_piano_tracks(Score(str(midi_path)))
+    beat_path = midi_path.parent / "beat_midi.txt"
+    score, _ = corrected_score(midi_path, beat_path)
+    score = merge_piano_tracks(score)
     encoded = tokenizer.encode(score)
     if isinstance(encoded, list):
         encoded = encoded[0]
@@ -81,12 +88,12 @@ def generate(model, prefix, bar_ids, config, device, target_bars=32, forbidden_i
 
     while bars <= target_bars:
         context = torch.tensor(
-            [ids[-model.context_length:]],
+            [ids[-model.config.n_positions:]],
             dtype=torch.long,
             device=device
         )
 
-        next_logits = model(context)[0, -1]
+        next_logits = model(input_ids=context, use_cache=False).logits[0, -1]
         next_id = sample_next(
             next_logits,
             config["temperature"],
@@ -125,6 +132,8 @@ def run_task_b(model, tokenizer, bar_ids, forbidden, device):
         prefix = tokenize_prompt(tokenizer, prompt_path)
         prompt_bars = sum(token in bar_ids for token in prefix)
         print(f"Prompt {prompt_path.stem}: {len(prefix)} tokens, {prompt_bars} Bar tokens")
+        if prompt_bars != 8:
+            print(f'WARNING: Expected 8 prompt bars, found {prompt_bars}: {prompt_path}')
 
         for config_name, config in SAMPLING_CONFIGS.items():
             ids = generate(model, prefix, bar_ids, config, device, forbidden_ids=forbidden)

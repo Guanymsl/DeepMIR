@@ -5,8 +5,9 @@ miditok
 symusic
 torch
 pretty_midi
-mido
 transformers
+
+matplotlib
 
 #pandas
 #MusDr
