@@ -19,6 +19,7 @@ def render_midi(midi_path, wav_path):
     subprocess.run([
         "fluidsynth",
         "-ni",
+         "-o", "synth.polyphony=1024",
         "-F", str(wav_path),
         "-r", "44100",
         str(SOUNDFONT_PATH),
@@ -27,9 +28,6 @@ def render_midi(midi_path, wav_path):
 
 def main():
     args = parse_args()
-
-    if not SOUNDFONT_PATH.is_file():
-        raise FileNotFoundError(f"SoundFont not found: {SOUNDFONT_PATH}")
 
     input_dir = INPUT_DIR / args.task
     output_dir = OUTPUT_DIR / args.task

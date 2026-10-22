@@ -6,8 +6,6 @@ symusic
 torch
 pretty_midi
 transformers
-
+scipy
+pandas
 matplotlib
-
-#pandas
-#MusDr

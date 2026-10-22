@@ -4,12 +4,13 @@ import torch
 import json
 
 from pathlib import Path
+from statistics import median
 from miditok import REMI
-from symusic import Track
+from symusic import Score, Track, Tempo
 from tqdm import tqdm
 from transformers import GPT2Config, GPT2LMHeadModel
 
-from tokenization import corrected_score
+from tokenization import read_beats
 
 CHECKPOINT_PATH = Path("outputs/checkpoints/best.pt")
 TOKENIZER_PATH = Path("outputs/tokens/tokenizer.json")
@@ -23,6 +24,7 @@ SAMPLING_CONFIGS = {
     "s2": {"top_k": 50, "temperature": 1.0},
     "s3": {"top_k": 100, "temperature": 1.2},
 }
+MAX_TOKENS_PER_BAR = 512
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -57,9 +59,34 @@ def merge_piano_tracks(score):
     score.tracks = [merged]
     return score
 
+def corrected_prompt_tempo(midi_path, beat_path):
+    score = Score(str(midi_path))
+    times, _ = read_beats(beat_path)
+
+    intervals = [b - a for a, b in zip(times, times[1:]) if b > a]
+
+    target_bpm = 60.0 / median(intervals)
+    original_bpm = score.tempos[0].qpm
+    scale = target_bpm / original_bpm
+
+    for track in score.tracks:
+        for note in track.notes:
+            old_start = note.time
+            old_end = note.time + note.duration
+
+            new_start = max(0, round(old_start * scale))
+            new_end = round(old_end * scale)
+
+            note.time = new_start
+            note.duration = max(1, new_end - new_start)
+
+    score.tempos = [Tempo(0, target_bpm)]
+
+    return score, target_bpm
+
 def tokenize_prompt(tokenizer, midi_path):
     beat_path = midi_path.parent / "beat_midi.txt"
-    score, _ = corrected_score(midi_path, beat_path)
+    score, _ = corrected_prompt_tempo(midi_path, beat_path)
     score = merge_piano_tracks(score)
     encoded = tokenizer.encode(score)
     if isinstance(encoded, list):
@@ -82,11 +109,25 @@ def save_tokens(ids, output_path):
         json.dump(ids, f)
 
 @torch.inference_mode()
-def generate(model, prefix, bar_ids, config, device, target_bars=32, forbidden_ids=()):
+def generate(model, prefix, bar_ids, config, device, target_bars=32, forbidden_ids=(), max_tokens_per_bar=None):
     ids = list(prefix)
     bars = sum(token in bar_ids for token in ids)
 
+    tokens_in_bar = 0
+    for token in reversed(ids):
+        if token in bar_ids:
+            break
+        tokens_in_bar += 1
+
     while bars <= target_bars:
+        if max_tokens_per_bar is not None and tokens_in_bar >= max_tokens_per_bar:
+            ids.append(next(iter(bar_ids)))
+            bars += 1
+            tokens_in_bar = 0
+            if bars > target_bars:
+                ids.pop()
+            continue
+
         context = torch.tensor(
             [ids[-model.config.n_positions:]],
             dtype=torch.long,
@@ -105,6 +146,9 @@ def generate(model, prefix, bar_ids, config, device, target_bars=32, forbidden_i
             bars += 1
             if bars > target_bars:
                 break
+            tokens_in_bar = 0
+        else:
+            tokens_in_bar += 1
 
         ids.append(next_id)
 
@@ -120,7 +164,7 @@ def run_task_a(model, tokenizer, bar_ids, start_bar_id, forbidden, device):
         folder = OUTPUT_DIR / "A" / config_name
 
         for i in tqdm(range(1, SAMPLES + 1), desc=f"Task A {config_name}"):
-            ids = generate(model, [start_bar_id], bar_ids, config, device, forbidden_ids=forbidden)
+            ids = generate(model, [start_bar_id], bar_ids, config, device, forbidden_ids=forbidden,  max_tokens_per_bar=MAX_TOKENS_PER_BAR)
             midi_path = folder / f"{i:03d}" / f"{i:03d}.mid"
             save_midi(tokenizer, ids, midi_path)
             save_tokens(ids, midi_path.with_suffix(".json"))
