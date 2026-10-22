@@ -16,7 +16,7 @@ from MusDr.musdr.side_utils import (
 )
 
 TOKENIZER_PATH = Path('outputs/tokens/tokenizer.json')
-ORIGINAL_PATH = Path("outputs/tokens")
+ORIGINAL_PATH = Path('outputs/tokens')
 GENERATED_DIR = Path('outputs/generated/A')
 OUTPUT_DIR = Path('outputs/evaluation')
 
@@ -86,9 +86,34 @@ def groove_similarity(ids, bar_id, pos_ids, pitch_ids, max_pairs=1000):
 def main():
     tokenizer = REMI(params=str(TOKENIZER_PATH))
     bar_id, pos_ids, pitch_ids = token_ids(tokenizer)
-    paths = sorted(GENERATED_DIR.glob('*/*/*.json'))
+
+    with (ORIGINAL_PATH / 'tokens.json').open(encoding='utf-8') as f:
+        original_songs = json.load(f)
 
     rows = []
+    skipped = 0
+    for song in tqdm(original_songs, desc='Evaluating Original POP909'):
+        for sequence in song['sequences']:
+            ids = normalized_sequence(sequence['ids'], bar_id)
+            bar_starts = [i for i, token in enumerate(ids) if token == bar_id]
+            if len(bar_starts) < 32:
+                skipped += 1
+                continue
+            end = bar_starts[32] if len(bar_starts) > 32 else len(ids)
+            ids = ids[bar_starts[0]:end]
+
+            rows.append({
+                'config': 'Original',
+                'song_name': song['song_name'],
+                'file': song['source_midi'],
+                'bars': normalized_sequence(ids, bar_id).count(bar_id),
+                'H1': pitch_entropy(ids, 1, bar_id, pitch_ids),
+                'H4': pitch_entropy(ids, 4, bar_id, pitch_ids),
+                'GS': groove_similarity(ids, bar_id, pos_ids, pitch_ids),
+            })
+    print(f'Skipped {skipped} original sequences with fewer than 32 bars')
+
+    paths = sorted(GENERATED_DIR.glob('*/*/*.json'))
     for path in tqdm(paths, desc='Evaluating Task A'):
         with path.open(encoding='utf-8') as f:
             ids = json.load(f)
@@ -113,7 +138,7 @@ def main():
              mean_H4=('H4', 'mean'), mean_GS=('GS', 'mean'))
         .sort_values('config')
     )
-    summary.to_csv(OUTPUT_DIR/ 'summary.csv', index=False)
+    summary.to_csv(OUTPUT_DIR / 'summary.csv', index=False)
 
     print('\nTask A Evaluation Summary:')
     print(summary.to_string(index=False, float_format=lambda v: f'{v:.4f}'))
