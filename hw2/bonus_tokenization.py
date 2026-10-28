@@ -9,7 +9,7 @@ from tokenization import corrected_score
 
 DATA_DIR = Path('data/POP909/training')
 TOKENIZER_PATH = Path('outputs/tokens/tokenizer.json')
-OUTPUT_PATH = Path('outputs/bonus/tokens_bonus.json')
+OUTPUT_PATH = Path('outputs/bonus/tokens.json')
 
 def select_track(score, name):
     tracks = [track for track in score.tracks if track.name.strip().upper() == name]
