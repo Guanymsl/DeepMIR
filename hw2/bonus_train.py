@@ -137,15 +137,43 @@ def main():
         decoder_start_token_id=pad_id,
         eos_token_id=eos_id,
     )
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = OUTPUT_DIR / "last.pt"
+    best_path = OUTPUT_DIR / "best.pt"
+    history_path = OUTPUT_DIR / "history.json"
+
+    checkpoint = None
+    if checkpoint_path.exists():
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        config = T5Config.from_dict(checkpoint["model_config"])
+
     model = T5ForConditionalGeneration(config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Device: {device} | Songs: {len(train_songs)} train / {len(val_songs)} val")
-
     best_val = math.inf
     history = []
-    for epoch in range(1, EPOCHS + 1):
+    start_epoch = 1
+
+    if checkpoint is not None:
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        best_val = checkpoint["val_loss"]
+
+        if best_path.exists():
+            best_checkpoint = torch.load(best_path, map_location="cpu", weights_only=False)
+            best_val = best_checkpoint["val_loss"]
+
+        if history_path.exists():
+            with history_path.open(encoding="utf-8") as f:
+                history = json.load(f)
+
+        print(f"Resuming from Epoch {start_epoch} | Best Val Loss: {best_val:.4f}")
+
+    print(f"Device: {device} | Songs: {len(train_songs)} train / {len(val_songs)} val")
+
+    for epoch in range(start_epoch, EPOCHS + 1):
         train_loss = run_epoch(model, train_loader, optimizer, device, True, GRAD_CLIP)
         val_loss = run_epoch(model, val_loader, optimizer, device, False, GRAD_CLIP)
         print(f"Epoch {epoch:03d}/{EPOCHS} | train_loss={train_loss:.4f} | val_loss={val_loss:.4f}")
@@ -162,6 +190,13 @@ def main():
 
         with (OUTPUT_DIR / "history.json").open("w", encoding="utf-8") as f:
             json.dump(history, f, indent=2)
+
+        if device == "mps":
+            print(
+                f"MPS Memory: "
+                f"{torch.mps.current_allocated_memory() / 1024**3:.2f} GB allocated | "
+                f"{torch.mps.driver_allocated_memory() / 1024**3:.2f} GB driver"
+            )
 
     print(f"Done. Best validation loss: {best_val:.4f} | Saved to {OUTPUT_DIR}")
 
