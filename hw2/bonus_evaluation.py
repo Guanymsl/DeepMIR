@@ -1,38 +1,31 @@
-"""
-Install the following dependencies before running this script:
-- numpy
-- pandas
-- tqdm
-- pretty_midi
-"""
-
-import os
-import argparse
 import pretty_midi
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from collections import Counter, namedtuple
 
-# ==========================================
-# Constants
-# ==========================================
+from pathlib import Path
+from tqdm import tqdm
+from collections import namedtuple
+
+PROMPT_DIR = Path('data/POP909/prompts/bonus')
+GENERATED_DIR = Path('outputs/bonus/generated')
+OUTPUT_DIR = Path('outputs/bonus/evaluation')
+
 BASS_WEIGHT = 3.0
 TIMESTEPS_PER_BAR = 32
 N_CLASSES = 32
 DEGENERATE_BANDWIDTH = 0.5
 
-NO_CHORD = -1            # ground truth is 'N', or no chord label covers the bar
-UNSUPPORTED_CHORD = -2   # ground-truth dim/aug/sus/unparseable: the 24-triad estimator cannot produce it
-NO_ESTIMATE = -3         # generated bar has no notes: never equal to any ground-truth label
+NO_CHORD = -1
+UNSUPPORTED_CHORD = -2
+NO_ESTIMATE = -3
 
 OA_COLS = {
-    "DP": "DP (Pitch-class OA)",
-    "DV": "DV (Velocity OA)",
-    "DD": "DD (Duration OA)",
-    "DIOI": "DIOI (Inter-Onset OA)",
+    'DP': 'DP (Pitch-class OA)',
+    'DV': 'DV (Velocity OA)',
+    'DD': 'DD (Duration OA)',
+    'DIOI': 'DIOI (Inter-Onset OA)',
 }
-METRIC_COLS = ["CA", "CA-ceiling"] + list(OA_COLS.values())
+METRIC_COLS = ['CA', 'CA-ceiling'] + list(OA_COLS.values())
 
 ROOTS = {'C': 0, 'B#': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'Fb': 4,
          'F': 5, 'E#': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9,
@@ -43,21 +36,12 @@ class SkipSong(Exception):
 
 def make_oa_grids(n_pitch):
     return {
-        "DP":   np.arange(n_pitch),           # 12 pitch classes
-        "DV":   np.arange(N_CLASSES),         # velocity classes 0..31
-        "DD":   np.arange(1, N_CLASSES + 1),  # duration classes 1..32
-        "DIOI": np.arange(1, N_CLASSES + 1),  # IOI classes 1..32 (same as duration)
+        "DP":   np.arange(n_pitch),
+        "DV":   np.arange(N_CLASSES),
+        "DD":   np.arange(1, N_CLASSES + 1),
+        "DIOI": np.arange(1, N_CLASSES + 1),
     }
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--prompt_dir', type=str, required=True, help='Path to the 16-bar prompts directory.')
-    parser.add_argument('--gen_midi_dir', type=str, required=True, help='Path to the generated MIDI files.')
-    parser.add_argument('--output_csv', type=str, default='conditional_metrics.csv', help='Output path for the evaluation results.')
-
-    return parser.parse_args()
-
-# === Time / beat utilities ===
 def time_to_beats(t, beat_times):
     t = np.asarray(t, dtype=float)
     beat_times = np.asarray(beat_times, dtype=float)
@@ -91,9 +75,6 @@ def load_gt_beats(path):
     return times, np.array(down)
 
 class GTBars:
-    """
-    Bar grid from the ground-truth beat file, optionally restricted to a bar range.
-    """
     def __init__(self, beat_times, down_idx, start_bar=0, max_bars=None):
         self.t, self.d = beat_times, down_idx
         total = len(down_idx) - 1
@@ -114,7 +95,6 @@ class GTBars:
         bar = np.where(beats < d[0], (beats - d[0]) / (d[1] - d[0]), bar)
         bar = np.where(beats > d[-1], (len(d) - 1) + (beats - d[-1]) / (d[-1] - d[-2]), bar)
         return bar * TIMESTEPS_PER_BAR
-# =========================================
 
 def pick_track(midi, name, fallback_idx):
     for inst in midi.instruments:
@@ -124,12 +104,7 @@ def pick_track(midi, name, fallback_idx):
         return midi.instruments[fallback_idx]
     raise SkipSong(f"no {name} track")
 
-# === Chord parsing and evaluation ===
 def parse_pop909_chord(chord_str):
-    """
-    Returns 0-11 (major triad root), 12-23 (minor triad root + 12),
-    NO_CHORD for 'N', UNSUPPORTED_CHORD for qualities the 24-triad estimator cannot represent.
-    """
     if chord_str == 'N':
         return NO_CHORD
     parts = chord_str.split(':')
@@ -185,11 +160,6 @@ def _build_templates():
 TEMPLATES = _build_templates()
 
 def estimate_chord(arr, t0, t1):
-    """
-    Chord of the generated notes in [t0, t1): best-matching of 24 major/minor triads
-    (bass-weighted chroma, cosine similarity). A bar without notes returns NO_ESTIMATE,
-    which never matches any ground-truth label (including 'N').
-    """
     if len(arr.starts) == 0:
         return NO_ESTIMATE
     m = (arr.starts < t1) & (arr.ends > t0)
@@ -206,9 +176,6 @@ def estimate_chord(arr, t0, t1):
     return int(np.argmax(TEMPLATES @ chroma / n))
 
 def chord_accuracy(gen_arr, gt_arr, chords, bars):
-    """
-    CA = (1 / N_bars) * sum_j I{C_j == C^_j}, over ALL bars (none are skipped).
-    """
     hits_gen = hits_gt = 0
     for i in range(bars.n_bars):
         b_start, b_end = bars.bar_start(i), bars.bar_end(i)
@@ -216,13 +183,8 @@ def chord_accuracy(gen_arr, gt_arr, chords, bars):
         hits_gen += int(estimate_chord(gen_arr, b_start, b_end) == ref)
         hits_gt += int(estimate_chord(gt_arr, b_start, b_end) == ref)
     return hits_gen / bars.n_bars, hits_gt / bars.n_bars
-# ==========================================
 
-# === Overlap Area (OA) of KDE-smoothed histograms ===
 def histogram_kde_pdf(samples, grid):
-    """
-    Histogram of integer class samples over `grid`, smoothed with a Gaussian KDE.
-    """
     samples = np.asarray(samples, dtype=float)
     n = len(samples)
     hist, _ = np.histogram(samples, bins=np.append(grid - 0.5, grid[-1] + 0.5))
@@ -235,30 +197,20 @@ def histogram_kde_pdf(samples, grid):
     if bw <= 0:
         bw = DEGENERATE_BANDWIDTH
 
-    # kernel[g, c] = Gaussian bump centred on class c, evaluated at class g
     kernel = np.exp(-0.5 * ((grid[:, None] - grid[None, :]) / bw) ** 2)
     pdf = kernel @ w
     return pdf / pdf.sum()
 
 def overlap_area(gt_samples, gen_samples, grid):
     if len(gt_samples) == 0 and len(gen_samples) == 0:
-        return 1.0      # both bars empty for this feature: identical (empty) distributions
+        return 1.0
     if len(gt_samples) == 0 or len(gen_samples) == 0:
-        return 0.0      # one side has no data: nothing overlaps
+        return 0.0
     pdf_gt = histogram_kde_pdf(gt_samples, grid)
     pdf_gen = histogram_kde_pdf(gen_samples, grid)
     return float(np.sum(np.minimum(pdf_gt, pdf_gen)))
 
 def track_features(notes, bars, n_pitch):
-    """
-    Per-note features for a whole track, each tagged with the bar it belongs to.
-      * onset  = start time quantised to the nearest timestep; the note belongs to the bar of that timestep
-      * D      = duration in timesteps, clipped to 1..32 (32 = one full bar)
-      * IOI    = timesteps between consecutive distinct onsets, clipped to 1..32 (same classes as D);
-                 it can span bar lines and is assigned to the bar of the later onset
-      * V      = MIDI velocity // 4  -> 32 classes (0..31)
-      * P      = pitch % 12 (12 pitch classes)
-    """
     if not notes:
         return None
     notes = sorted(notes, key=lambda n: (n.start, n.pitch))
@@ -272,7 +224,6 @@ def track_features(notes, bars, n_pitch):
     onsets = np.round(s_ts)
     bar = np.floor_divide(onsets, TIMESTEPS_PER_BAR).astype(int) - bars.first
 
-    # distinct onset positions (simultaneous notes share one onset)
     is_new = np.r_[True, np.diff(onsets) != 0]
     u_onsets, u_bar = onsets[is_new], bar[is_new]
 
@@ -291,9 +242,6 @@ def _select(feat, key, bar_key, b):
     return feat[key][feat[bar_key] == b]
 
 def song_oa(gt_notes, gen_notes, bars, n_pitch=12):
-    """
-    D_A = (1 / N_bars) * sum_j OA(P^A_j, P^^A_j), over ALL bars.
-    """
     grids = make_oa_grids(n_pitch)
     f_gt = track_features(gt_notes, bars, n_pitch)
     f_gen = track_features(gen_notes, bars, n_pitch)
@@ -307,81 +255,72 @@ def song_oa(gt_notes, gen_notes, bars, n_pitch=12):
                                        _select(f_gen, key, bar_key, b), grid)
 
     return {OA_COLS[k]: oa_sums[k] / bars.n_bars for k in grids}
-# =========================================
 
-def evaluate_song(song, args):
-    gen_path = os.path.join(args.gen_midi_dir, f"{song}.mid")
-    if not os.path.exists(gen_path):
-        raise SkipSong("Generated MIDI missing")
-
-    gen_midi = pretty_midi.PrettyMIDI(gen_path)
+def evaluate_song(song, gen_path):
+    gen_midi = pretty_midi.PrettyMIDI(str(gen_path))
     if len(gen_midi.instruments) < 2:
-        raise SkipSong("Generated MIDI has fewer than 2 tracks")
-    gen_piano = pick_track(gen_midi, "PIANO", 1)
+        raise SkipSong('Generated MIDI has fewer than 2 tracks')
+    gen_piano = pick_track(gen_midi, 'PIANO', 1)
 
-    prompt_folder = os.path.join(args.prompt_dir, song)
-    beat_times, down = load_gt_beats(os.path.join(prompt_folder, "beat_midi.txt"))
+    prompt_folder = PROMPT_DIR / song
+    beat_times, down = load_gt_beats(prompt_folder / 'beat_midi.txt')
     bars = GTBars(beat_times, down)
     if bars.n_bars <= 0:
-        raise SkipSong("no bars in the requested range")
-    chords = load_gt_chords(os.path.join(prompt_folder, "chord_midi.txt"))
+        raise SkipSong('No bars in the requested range')
+    chords = load_gt_chords(prompt_folder / 'chord_midi.txt')
 
-    gt_piano_path = os.path.join(prompt_folder, "piano.mid")
-    if not os.path.exists(gt_piano_path):
-        raise SkipSong("GT Piano MIDI missing in prompt folder")
-    gt_midi = pretty_midi.PrettyMIDI(gt_piano_path)
-    gt_piano = pick_track(gt_midi, "PIANO", 0)
+    gt_piano_path = prompt_folder / 'piano.mid'
+    if not gt_piano_path.exists():
+        raise SkipSong('Ground-truth Piano MIDI missing')
+    gt_midi = pretty_midi.PrettyMIDI(str(gt_piano_path))
+    gt_piano = pick_track(gt_midi, 'PIANO', 0)
 
     gen_arr = note_arrays(gen_piano.notes)
     gt_arr = note_arrays(gt_piano.notes)
+    ca, ca_ceiling = chord_accuracy(gen_arr, gt_arr, chords, bars)
 
-    res = {"n_bars": bars.n_bars}
+    return {
+        'n_bars': bars.n_bars,
+        'CA': ca,
+        'CA-ceiling': ca_ceiling,
+        **song_oa(gt_piano.notes, gen_piano.notes, bars),
+    }
 
-    # Chord Accuracy (CA-ceiling = same estimator run on the ground-truth piano)
-    ca, ca_ceil = chord_accuracy(gen_arr, gt_arr, chords, bars)
-    res["CA"] = ca
-    res["CA-ceiling"] = ca_ceil
-
-    # Overlap Area of pitch / velocity / duration / IOI distributions
-    res.update(song_oa(gt_piano.notes, gen_piano.notes, bars))
-
-    return res
-
-if __name__ == "__main__":
-    args = parse_args()
-
-    gen_files = sorted([f for f in os.listdir(args.gen_midi_dir) if f.endswith(".mid")])
-    print(f"Evaluating {len(gen_files)} conditional generation files...")
-
+def main():
+    paths = sorted(GENERATED_DIR.glob('*/*.mid'))
     rows = []
-    skipped = Counter()
+    skipped = 0
 
-    for filename in tqdm(gen_files):
-        song_name = filename[:-4]
+    for path in tqdm(paths, desc='Evaluating Bonus'):
+        song_name = path.parent.name
         try:
-            res = evaluate_song(song_name, args)
-            rows.append({"song_name": song_name, **res})
-        except SkipSong as e:
-            skipped[str(e)] += 1
+            metrics = evaluate_song(song_name, path)
+            rows.append({'song_name': song_name, **metrics})
         except Exception as e:
-            skipped[f"error: {type(e).__name__}: {e}"] += 1
-            tqdm.write(f"Error evaluating {filename}: {e}")
+            skipped += 1
+            tqdm.write(f'Skipped {song_name}: {e}')
 
-    if sum(skipped.values()) > 0:
-        print(f"\nSkipped {sum(skipped.values())} songs:")
-        for reason, c in skipped.most_common():
-            print(f"  - {c:4d}: {reason}")
+    print(f'Skipped {skipped} songs')
+    if not rows:
+        print('No valid songs were evaluated.')
+        return
 
-    if rows:
-        df = pd.DataFrame(rows, columns=["song_name", "n_bars"] + METRIC_COLS)
-        df.to_csv(args.output_csv, index=False, encoding='utf-8')
-        print(f"\nEvaluation complete! Results saved to {args.output_csv}")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(rows, columns=['song_name', 'n_bars'] + METRIC_COLS)
+    df.to_csv(OUTPUT_DIR / 'metrics.csv', index=False)
 
-        # Pooled over all (track, bar) pairs: 1 / (sum of bars) * sum over every bar of every track
-        total_bars = df["n_bars"].sum()
-        print(f"\n=== Average Summary (pooled over {len(df)} songs, {total_bars} bars) ===")
-        for col in METRIC_COLS:
-            pooled = (df[col] * df["n_bars"]).sum() / total_bars
-            print(f"Average {col}: {pooled:.4f}")
-    else:
-        print("\nNo valid songs were evaluated. CSV not generated.")
+    total_bars = df['n_bars'].sum()
+    summary = pd.DataFrame([{
+        'samples': len(df),
+        'bars': total_bars,
+        **{col: (df[col] * df['n_bars']).sum() / total_bars for col in METRIC_COLS},
+    }])
+    summary.to_csv(OUTPUT_DIR / 'summary.csv', index=False)
+
+    print('\nBonus Evaluation Summary:')
+    print(summary.to_string(index=False, float_format=lambda v: f'{v:.4f}'))
+    print(f'\nSaved: {OUTPUT_DIR / "metrics.csv"}')
+    print(f'Saved: {OUTPUT_DIR / "summary.csv"}')
+
+if __name__ == '__main__':
+    main()
