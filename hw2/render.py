@@ -10,7 +10,7 @@ SOUNDFONT_PATH = Path("soundfonts/FluidR3_GM.sf2")
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", required=True, choices=["A", "B", "O"])
+    parser.add_argument("--task", required=True, choices=["A", "B", "O", "U"])
     return parser.parse_args()
 
 def render_midi(midi_path, wav_path):
@@ -35,6 +35,15 @@ def main():
         midi_files = sorted(input_dir.rglob("*.mid"))
 
         for midi_path in tqdm(midi_files, desc=f"Original"):
+            wav_path = output_dir / f"{midi_path.stem}.wav"
+            render_midi(midi_path, wav_path)
+
+    elif args.task == "U":
+        input_dir = Path("outputs/bonus/generated")
+        output_dir = Path("outputs/bonus/rendered")
+        midi_files = sorted(input_dir.rglob("*.mid"))
+
+        for midi_path in tqdm(midi_files, desc=f"Bonus"):
             wav_path = output_dir / f"{midi_path.stem}.wav"
             render_midi(midi_path, wav_path)
 
