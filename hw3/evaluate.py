@@ -2,25 +2,25 @@ import argparse
 import json
 import subprocess
 import sys
+import torch
 
 from pathlib import Path
 
 from hw3.common import read_captions, audio_files
-from hw3.clap_utils import load_clap, embed_text, embed_audio, DEFAULT_CKPT
+from hw3.clap_utils import load_clap, embed_text, embed_audio, CKPT
 
 CAPTIONS_PATH = Path("test.csv")
+OUTPUT_PATH = Path("outputs/evaluation/clap_music.json")
+
+BATCH_SIZE = 8
+SECONDS = 10
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=['clap','official'], default='clap')
+    parser.add_argument('--mode', required=True, choices=['clap','official'])
     parser.add_argument('--pred', default='outputs/baseline')
-    parser.add_argument('--gt', help='reference WAV/FLAC folder; paired matching filenames needed for KL')
-    parser.add_argument('--checkpoint', default=DEFAULT_CKPT)
-    parser.add_argument('--device', choices=['auto','cpu','cuda','mps'], default='auto')
-    parser.add_argument('--batch-size', type=int, default=8)
-    parser.add_argument('--output', default='outputs/evaluation/clap_music.json')
+    parser.add_argument('--gt')
     parser.add_argument('--av-benchmark')
-    parser.add_argument('--seconds', type=float, default=10.0)
     parser.add_argument('--unpaired', action='store_true')
     return parser.parse_args()
 
@@ -56,6 +56,7 @@ def official(args):
     subprocess.run(cmd, cwd=str(repo), check=True)
 
 def main():
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     args = parse_args()
 
     if args.mode == 'clap':
