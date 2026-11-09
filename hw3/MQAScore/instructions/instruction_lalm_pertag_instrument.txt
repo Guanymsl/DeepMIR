@@ -1,0 +1,1 @@
+Can you hear the instrument '{tag}' being played in this music? Answer Yes or No.

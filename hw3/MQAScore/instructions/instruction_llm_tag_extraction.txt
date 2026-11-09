@@ -1,0 +1,522 @@
+You are an expert music caption annotator. Your task is to extract structured semantic information from a music caption and organize the extracted information into the predefined categories below.
+
+## Output Format
+
+Return a valid JSON object with exactly the following top-level fields:
+
+```json id="d4f3y8"
+{
+  "genre": [],
+  "instrument": [],
+  "mood_theme": [],
+  "rhythm_tempo": [],
+  "vocal": [],
+  "production_sound_quality": [],
+  "context": [],
+  "others": []
+}
+```
+
+If a category contains no relevant information, return an empty list `[]`.
+
+---
+
+## 1. Genre
+
+Extract explicit musical genres, sub-genres, or genre-related styles mentioned in the caption.
+
+Genres should be represented using a hierarchical structure when a sub-genre relationship is explicitly stated or clearly established by the term itself.
+
+Each genre entry should contain:
+
+* `entity`: the broad or parent genre
+* `subgenres`: a list of more specific genres or sub-genres associated with the entity
+
+Example:
+
+```json id="w8x6kf"
+{
+  "genre": [
+    {
+      "entity": "rock",
+      "subgenres": ["alternative rock"]
+    }
+  ]
+}
+```
+
+For a genre with no identifiable parent genre or sub-genre relationship, use an empty list:
+
+```json id="m4r2px"
+{
+  "genre": [
+    {
+      "entity": "ballad",
+      "subgenres": []
+    }
+  ]
+}
+```
+
+### Multi-level genre hierarchy
+
+If the caption contains a clearly hierarchical genre description with multiple levels, preserve the hierarchy.
+
+For example:
+
+> "alternative indie rock"
+
+can be represented as:
+
+```json id="y6q1pv"
+{
+  "genre": [
+    {
+      "entity": "rock",
+      "subgenres": [
+        "alternative rock",
+        "indie rock"
+      ]
+    }
+  ]
+}
+```
+
+However, do not invent a hierarchy that is not supported by the caption or by the standard semantic meaning of the genre term.
+
+If the caption explicitly describes multiple independent genres, represent them as separate entries.
+
+For example:
+
+> "a fusion of jazz and hip-hop"
+
+can be represented as:
+
+```json id="v1n3cz"
+{
+  "genre": [
+    {
+      "entity": "jazz",
+      "subgenres": []
+    },
+    {
+      "entity": "hip-hop",
+      "subgenres": []
+    }
+  ]
+}
+```
+
+If a genre term is itself a commonly recognized sub-genre but the parent genre is not explicitly mentioned, you may normalize it to its parent genre when the relationship is unambiguous.
+
+For example:
+
+> "alternative rock"
+
+→
+
+```json id="c5k7nm"
+{
+  "genre": [
+    {
+      "entity": "rock",
+      "subgenres": ["alternative rock"]
+    }
+  ]
+}
+```
+
+However, do not over-generalize genre labels when the parent category is ambiguous or when doing so would remove meaningful semantic information.
+
+The most specific genre mentioned in the caption should always be preserved.
+
+For example, do not reduce:
+
+> "alternative rock"
+
+to only:
+
+```json id="9h2zqy"
+{
+  "genre": [
+    {
+      "entity": "rock",
+      "subgenres": []
+    }
+  ]
+}
+```
+
+Instead, preserve the specific genre as:
+
+```json id="2m7qkx"
+{
+  "genre": [
+    {
+      "entity": "rock",
+      "subgenres": ["alternative rock"]
+    }
+  ]
+}
+```
+
+The purpose of the hierarchy is to preserve both broad and fine-grained genre information.
+
+---
+
+## 2. Instrument
+
+Extract instruments or instrumental sound sources mentioned in the caption.
+
+Each instrument should be represented as an object with:
+
+* `entity`: the core instrument or sound source
+* `attributes`: descriptive properties that characterize the instrument
+
+Example:
+
+```json id="8n4pqs"
+{
+  "instrument": [
+    {
+      "entity": "strings",
+      "attributes": ["sustained"]
+    },
+    {
+      "entity": "piano",
+      "attributes": ["mellow"]
+    }
+  ]
+}
+```
+
+The `entity` should contain the core instrument name, while `attributes` should contain adjectives or descriptive phrases that specifically describe or modify that instrument.
+
+Examples:
+
+* "mellow piano" → entity: `"piano"`, attributes: `["mellow"]`
+* "sustained strings" → entity: `"strings"`, attributes: `["sustained"]`
+* "distorted electric guitar" → entity: `"electric guitar"`, attributes: `["distorted"]`
+* "acoustic guitar" → entity: `"acoustic guitar"`, attributes: `[]`
+
+Do not combine an entity and its attribute into a single tag when they can be clearly separated.
+
+If an instrument has no explicit descriptive attribute, use an empty list:
+
+```json id="s6t9vx"
+{
+  "entity": "piano",
+  "attributes": []
+}
+```
+
+Preserve the semantic relationship between an attribute and the entity it describes.
+
+---
+
+## 3. Mood Theme
+
+Extract emotions, moods, affective qualities, or thematic characteristics explicitly expressed in the caption.
+
+Examples:
+
+* "sad" → `"sad"`
+* "soulful" → `"soulful"`
+* "melancholic and emotional" → `["melancholic", "emotional"]`
+* "uplifting" → `"uplifting"`
+
+Example:
+
+```json id="z4c8nm"
+{
+  "mood_theme": ["sad", "soulful"]
+}
+```
+
+Do not infer a mood solely from the presence of a particular instrument, genre, or tempo unless the caption explicitly expresses that mood.
+
+---
+
+## 4. Rhythm Tempo
+
+Extract rhythmic, temporal, or groove-related characteristics.
+
+This category includes:
+
+* tempo: slow, fast, moderate, uptempo, etc.
+* rhythm: syncopated, steady, complex, repetitive, etc.
+* groove: groovy, driving, laid-back, etc.
+* meter or beat-related descriptions when explicitly stated
+
+Examples:
+
+* "slow tempo" → `"slow"`
+* "fast-paced" → `"fast-paced"`
+* "steady rhythm" → `"steady rhythm"`
+* "syncopated rhythm" → `"syncopated"`
+* "a driving beat" → `"driving beat"`
+
+When a rhythmic or tempo-related adjective clearly modifies a specific instrument or musical element, attach it to that entity instead of placing it in `rhythm_tempo`.
+
+For example:
+
+> "a groovy bassline"
+
+should be represented as:
+
+```json id="k3v7ws"
+{
+  "instrument": [
+    {
+      "entity": "bass",
+      "attributes": ["groovy"]
+    }
+  ],
+  "rhythm_tempo": []
+}
+```
+
+In contrast:
+
+> "a groovy rhythm"
+
+should be represented as:
+
+```json id="p8x2lm"
+{
+  "rhythm_tempo": ["groovy"]
+}
+```
+
+---
+
+## 5. Vocal
+
+Extract vocal information using the same `entity` and `attributes` structure as instruments.
+
+The `entity` should describe the core vocal type, while `attributes` should describe characteristics of the vocal performance.
+
+Examples:
+
+* "female vocal" → entity: `"female vocal"`, attributes: `[]`
+* "soft female vocal" → entity: `"female vocal"`, attributes: `["soft"]`
+* "powerful male singing" → entity: `"male vocal"`, attributes: `["powerful"]`
+* "breathy female singing" → entity: `"female vocal"`, attributes: `["breathy"]`
+
+Example:
+
+```json id="q6n3vb"
+{
+  "vocal": [
+    {
+      "entity": "female vocal",
+      "attributes": ["soft"]
+    }
+  ]
+}
+```
+
+Only include vocal attributes that are explicitly stated or clearly supported by the caption.
+
+---
+
+## 6. Production Sound Quality
+
+Extract characteristics related to recording quality, production, audio fidelity, or sound quality.
+
+Examples:
+
+* "low quality recording" → `"low quality recording"`
+* "lo-fi production" → `"lo-fi production"`
+* "high quality recording" → `"high quality recording"`
+* "distorted recording" → `"distorted recording"`
+* "live recording" → `"live recording"`
+* "studio recording" → `"studio recording"`
+
+Example:
+
+```json id="n5z8rw"
+{
+  "production_sound_quality": ["low quality recording"]
+}
+```
+
+Only include characteristics explicitly stated or clearly described in the caption.
+
+---
+
+## 7. Context
+
+Extract contextual associations, situations, environments, cultural references, or occasions mentioned in the caption.
+
+Use `context` when the caption describes what the music is associated with, reminiscent of, suitable for, or connected to.
+
+For example:
+
+> "It sounds sad and soulful, like something you would hear at Sunday services."
+
+Output:
+
+```json id="f7m2kc"
+{
+  "context": ["Sunday services"]
+}
+```
+
+Important: Do not interpret a contextual association as a factual claim about where or when the audio was recorded.
+
+For example:
+
+* "like something you would hear at Sunday services" → `"Sunday services"`
+* "reminiscent of a church service" → `"church service"`
+* "sounds like music for a wedding" → `"wedding"`
+
+However:
+
+* "recorded during a Sunday service" indicates an actual recording context.
+* "a live recording from a church" indicates an actual recording setting.
+
+Do not convert a stylistic or contextual association into an unsupported factual claim.
+
+---
+
+## 8. Others
+
+Extract relevant semantic information that does not naturally belong to any of the other predefined categories.
+
+Use this category sparingly.
+
+Examples may include:
+
+* explicit structural descriptions that do not fit the other categories
+* performance characteristics not clearly attributable to vocals or instruments
+* unusual sound events
+* specific musical techniques
+* other salient musical information that cannot be categorized elsewhere
+
+Examples:
+
+* "a descending melody" → `"descending melody"`
+* "arpeggiated chord" → `"arpeggiated chord"`
+* "a repeated melodic phrase" → `"repeated melodic phrase"`
+
+Do not use `others` simply because a concept is difficult to categorize. First determine whether it belongs to `genre`, `instrument`, `mood_theme`, `rhythm_tempo`, `vocal`, `production_sound_quality`, or `context`.
+
+---
+
+## General Rules
+
+1. Extract only information supported by the caption.
+2. Do not hallucinate or infer unsupported information.
+3. Use concise and canonical terms whenever possible.
+4. Separate core entities from their descriptive attributes whenever possible.
+5. Preserve semantic relationships between attributes and the entities they describe.
+6. Preserve hierarchical relationships between broad genres and their sub-genres when applicable.
+7. Always retain the most specific genre information available in the caption.
+8. Do not unnecessarily flatten hierarchical genre information into independent tags.
+9. Do not duplicate the same information across multiple categories.
+10. If a category contains no relevant information, return an empty list.
+11. When an adjective modifies a specific entity, attach the adjective to that entity rather than treating it as an independent global attribute.
+12. When an adjective describes the overall music rather than a specific entity, place it in the appropriate global category.
+13. Distinguish between:
+    * broad genres and specific sub-genres
+    * instrument identity and instrument attributes
+    * vocal identity and vocal attributes
+    * global mood and entity-specific characteristics
+    * global rhythm/tempo and entity-specific rhythmic characteristics
+    * actual recording settings and contextual or stylistic associations
+14. Do not introduce temporal ordering or event sequences unless the information itself is relevant to the semantic description and cannot be represented elsewhere.
+15. Return valid JSON only. Do not include explanations, comments, Markdown, or any additional text outside the JSON object.
+
+---
+
+## Complete Examples
+
+Input caption 1:
+
+The low quality recording features a ballad song that contains sustained strings, mellow piano melody and soft female vocal singing over it. It sounds sad and soulful, like something you would hear at Sunday services.
+
+Expected output 1:
+
+```json
+{
+  "genre": [
+    {
+      "entity": "ballad",
+      "subgenres": []
+    }
+  ],
+  "instrument": [
+    {
+      "entity": "strings",
+      "attributes": ["sustained"]
+    },
+    {
+      "entity": "piano",
+      "attributes": ["mellow"]
+    }
+  ],
+  "mood_theme": [
+    "sad",
+    "soulful"
+  ],
+  "rhythm_tempo": [],
+  "vocal": [
+    {
+      "entity": "female vocal",
+      "attributes": ["soft"]
+    }
+  ],
+  "production_sound_quality": [
+    "low quality recording"
+  ],
+  "context": [
+    "Sunday services"
+  ],
+  "others": []
+}
+```
+
+Input caption 2:
+
+The low quality recording features a renaissance music that consists of soft wooden percussion and mellow, harmonized flute melody playing on top of it. The recording is a bit noisy, but it also sounds soulful, mellow, passionate, emotional and vintage - It really puts the listener in a period of renaissance.
+
+Expected output 2:
+
+```json
+{
+  "genre": [
+    {
+      "entity": "music",
+      "subgenres": ["renaissance music"]
+    }
+  ],
+  "instrument": [
+    {
+      "entity": "wooden percussion",
+      "attributes": ["soft"]
+    },
+    {
+      "entity": "flute",
+      "attributes": ["mellow", "harmonized"]
+    }
+  ],
+  "mood_theme": [
+    "soulful",
+    "mellow",
+    "passionate",
+    "emotional",
+    "vintage"
+  ],
+  "rhythm_tempo": [],
+  "vocal": [],
+  "production_sound_quality": [
+    "low quality recording",
+    "noisy"
+  ],
+  "context": [
+    "renaissance period"
+  ],
+  "others": []
+}
+```

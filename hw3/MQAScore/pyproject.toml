@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mqascore"
+version = "0.1.0"
+description = "MQAScore: text-to-music alignment by per-tag yes/no probing of audio-language models"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch", "transformers", "librosa", "soundfile", "numpy", "tqdm"]
+
+[project.optional-dependencies]
+qwen = ["qwen-omni-utils"]
+tags = ["vllm"]
+
+[tool.setuptools.packages.find]
+include = ["mqascore*"]
