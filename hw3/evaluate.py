@@ -151,9 +151,8 @@ def main():
 
         captions = mqa_output / 'captions_test.jsonl'
         tags = mqa_output / 'tags_test.jsonl'
-        scores_path = mqa_output / 'qwen2_test.jsonl'
+        scores_path = mqa_output / 'af2_test.jsonl'
 
-        # Test only one audio file
         with CAPTIONS_PATH.open(newline='', encoding='utf-8') as f:
             rows = list(csv.DictReader(f))[:1]
 
@@ -176,7 +175,6 @@ def main():
                 }
                 f.write(json.dumps(item, ensure_ascii=False) + '\n')
 
-        # Step 1: Extract tags using Qwen3-1.7B + vLLM
         if not tags.exists():
             cmd = [
                 'conda', 'run', '--no-capture-output',
@@ -187,17 +185,25 @@ def main():
                 '--output', str(tags),
                 '--limit', '1',
                 '--max-model-len', '4096',
-                '--max-new-tokens', '256',
+                '--max-new-tokens', '1024',
                 '--gpu-memory-utilization', '0.85',
             ]
             run(cmd)
+            
+        with tags.open(encoding='utf-8') as f:
+            tag_data = [json.loads(line) for line in f if line.strip()]
 
-        # Step 2: Score with Qwen2-Audio (4-bit)
+        if not tag_data:
+            raise RuntimeError('MQAScore tag extraction produced no results')
+
+        if any('error' in item for item in tag_data):
+            raise RuntimeError(f'MQAScore tag extraction failed: {tag_data}')
+
         cmd = [
             'conda', 'run', '--no-capture-output',
-            '-n', 'mqascore_qwen2',
+            '-n', 'mqascore_af2',
             'python', 'MQAScore/scripts/score.py',
-            '--model', 'qwen2audio',
+            '--model', 'af2',
             '--input', str(tags),
             '--output', str(scores_path),
             '--protocol', 'pertag',

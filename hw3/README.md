@@ -28,5 +28,6 @@ formula is the same.
 
 Git clone avbench
 git clone https://github.com/Lonian6/MQAScore.git
+git clone af2
 change to music_audioset_epoch_15_esc_90.14.pt in extraction_models.py
 python3 prepare.py
