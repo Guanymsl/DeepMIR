@@ -9,9 +9,6 @@ soundfile==0.14.0
 
 huggingface_hub
 
-#numpy
-#pandas
 #soundfile
 #tqdm
-#librosa
 #laion-clap

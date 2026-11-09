@@ -25,3 +25,8 @@ With a correct implementation the difference is `0` (written in the same form as
 
 Note: Stable Audio Open is a v-prediction model, so the model outputs are v rather than noise. CFG is linear, so the
 formula is the same.
+
+Git clone avbench
+git clone https://github.com/Lonian6/MQAScore.git
+change to music_audioset_epoch_15_esc_90.14.pt in extraction_models.py
+python3 prepare.py

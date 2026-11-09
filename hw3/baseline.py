@@ -10,7 +10,7 @@ from common import read_captions
 
 MODEL_PATH = "stabilityai/stable-audio-open-1.0"
 CAPTIONS_PATH = Path("test.csv")
-OUTPUT_DIR = Path("outputs/generated")
+OUTPUT_DIR = Path("outputs/generated/baseline")
 
 SEED = 42
 SECONDS = 20
@@ -32,6 +32,7 @@ def main():
     rows = read_captions(CAPTIONS_PATH)
     pipe = StableAudioPipeline.from_pretrained(MODEL_PATH, dtype=dtype)
     pipe = pipe.to(device)
+    pipe.set_progress_bar_config(leave=False)
 
     for sample_id, caption in tqdm(rows, desc='Generate'):
         path = OUTPUT_DIR / f'{sample_id}.wav'

@@ -1,68 +1,235 @@
 import argparse
+import csv
 import json
 import subprocess
 import sys
 import torch
+import laion_clap
 
 from pathlib import Path
 
-from hw3.common import read_captions, audio_files
-from hw3.clap_utils import load_clap, embed_text, embed_audio, CKPT
+CAPTIONS_PATH = Path("outputs/av.csv")
+GT_DIR = Path("audio_wav")
+PRED_DIR = Path("outputs/generated")
+OUTPUT_DIR = Path("outputs/evaluation")
 
-CAPTIONS_PATH = Path("test.csv")
-OUTPUT_PATH = Path("outputs/evaluation/clap_music.json")
+METRICS = ("fd-vgg", "kl-passt", "clap", "mqascore")
 
 BATCH_SIZE = 8
 SECONDS = 10
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', required=True, choices=['clap','official'])
-    parser.add_argument('--pred', default='outputs/baseline')
-    parser.add_argument('--gt')
-    parser.add_argument('--av-benchmark')
-    parser.add_argument('--unpaired', action='store_true')
+    parser.add_argument('--pred', required=True)
+    parser.add_argument('--paired-gt', type=Path)
+    parser.add_argument(
+        '--metrics',
+        nargs='+',
+        choices=[*METRICS, 'all'],
+        required=True,
+    )
     return parser.parse_args()
 
-def clap_score(args):
-    rows = read_captions(CAPTIONS_PATH)
-
-    by_id = {p.stem: p for p in audio_files(args.pred)}
-
-    model = load_clap(args.checkpoint, args.device)
-    te = embed_text(model, [caption for _, caption in rows])
-    ae = embed_audio(model, [by_id[sid] for sid, _ in rows], args.batch_size)
-    scores = (te * ae).sum(axis=1)
-
-    result = {'CLAP_music_mean_cosine': float(scores.mean()), 'CLAP_music_std_cosine': float(scores.std()),
-              'checkpoint': str(args.checkpoint), 'num_samples': len(rows),
-              'per_sample': {sid: float(score) for (sid, _), score in zip(rows, scores)}}
-
-    out = Path(args.output); out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
-
-    print(f'CLAP (music checkpoint): {scores.mean():.6f}  ({len(rows)} samples)')
-    print('Saved:', out)
-
-def official(args):
-    repo = Path(args.av_benchmark).expanduser().resolve()
-    script = repo / 'evaluate.py'
-
-    cmd = [sys.executable, str(script), '--gt_audio', str(Path(args.gt).resolve()),
-           '--pred_audio', str(Path(args.pred).resolve()), '--audio_length', str(args.seconds),
-           '--skip_video_related', '--skip_clap']
-    if args.unpaired: cmd.append('--unpaired')
-    print('Running official av-benchmark:', ' '.join(cmd), flush=True)
-    subprocess.run(cmd, cwd=str(repo), check=True)
+def run(cmd):
+    print('Running:', ' '.join(map(str, cmd)), flush=True)
+    subprocess.run(list(map(str, cmd)), check=True)
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     args = parse_args()
 
-    if args.mode == 'clap':
-        clap_score(args)
-    else:
-        official(args)
+    script = Path("av-benchmark/evaluate.py")
+
+    pred = PRED_DIR / args.pred
+    output = OUTPUT_DIR / args.pred
+    metrics = set(METRICS) if 'all' in args.metrics else set(args.metrics)
+
+    output.mkdir(parents=True, exist_ok=True)
+    result = {}
+
+    if 'fd-vgg' in metrics:
+        gt_cache = output / 'musiccaps_cache'
+        pred_cache = output / 'unpaired_cache'
+
+        cmd = [
+            sys.executable,
+            str(script),
+            '--gt_audio', str(GT_DIR),
+            '--pred_audio', str(pred),
+            '--gt_cache', str(gt_cache),
+            '--pred_cache', str(pred_cache),
+            '--audio_length', str(SECONDS),
+            '--gt_batch_size', '1',
+            '--pred_batch_size', str(BATCH_SIZE),
+            '--skip_video_related',
+            '--skip_clap',
+            '--unpaired',
+        ]
+        run(cmd)
+
+        with (pred_cache / 'output_metrics.json').open() as f:
+            data = json.load(f)
+
+        result['FD-VGG'] = data['FD-VGG']
+
+    if 'clap' in metrics:
+        checkpoint = Path("av-benchmark/weights/music_audioset_epoch_15_esc_90.14.pt")
+
+        with CAPTIONS_PATH.open(newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+
+        model = laion_clap.CLAP_Module(
+            enable_fusion=False,
+            amodel='HTSAT-base',
+        )
+        model.load_ckpt(str(checkpoint))
+        model.eval()
+
+        scores = {}
+
+        with torch.inference_mode():
+            for i in range(0, len(rows), BATCH_SIZE):
+                batch = rows[i:i + BATCH_SIZE]
+                texts = [row['caption'] for row in batch]
+                files = [
+                    next(
+                        p for p in pred.iterdir()
+                        if p.stem == str(row['name'])
+                        and p.suffix.lower() in ('.wav', '.flac', '.mp3')
+                    )
+                    for row in batch
+                ]
+
+                text_emb = model.get_text_embedding(
+                    texts, use_tensor=True
+                )
+                audio_emb = model.get_audio_embedding_from_filelist(
+                    x=[str(p) for p in files],
+                    use_tensor=True,
+                )
+
+                text_emb = torch.nn.functional.normalize(text_emb, dim=-1)
+                audio_emb = torch.nn.functional.normalize(audio_emb, dim=-1)
+                values = (text_emb * audio_emb).sum(dim=-1)
+
+                for row, score in zip(batch, values):
+                    scores[str(row['name'])] = float(score.item())
+
+        result['LAION-CLAP-Score'] = sum(scores.values()) / len(scores)
+
+        (output / 'clap.json').write_text(
+            json.dumps(scores, indent=2) + '\n',
+            encoding='utf-8',
+        )
+
+    if 'kl-passt' in metrics:
+        gt_cache = output / 'paired_gt_cache'
+        pred_cache = output / 'paired_pred_cache'
+
+        cmd = [
+            sys.executable,
+            str(script),
+            '--gt_audio', str(args.paired_gt),
+            '--pred_audio', str(pred),
+            '--gt_cache', str(gt_cache),
+            '--pred_cache', str(pred_cache),
+            '--audio_length', str(SECONDS),
+            '--gt_batch_size', '1',
+            '--pred_batch_size', str(BATCH_SIZE),
+            '--skip_video_related',
+            '--skip_clap',
+        ]
+        run(cmd)
+
+        with (pred_cache / 'output_metrics.json').open() as f:
+            data = json.load(f)
+
+        result['KL-PASST-softmax'] = data['KL-PASST-softmax']
+
+    if 'mqascore' in metrics:
+        mqa_output = output / 'mqascore'
+        mqa_output.mkdir(parents=True, exist_ok=True)
+
+        captions = mqa_output / 'captions_test.jsonl'
+        tags = mqa_output / 'tags_test.jsonl'
+        scores_path = mqa_output / 'qwen2_test.jsonl'
+
+        # Test only one audio file
+        with CAPTIONS_PATH.open(newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))[:1]
+
+        with captions.open('w', encoding='utf-8') as f:
+            for row in rows:
+                sid = str(row['name'])
+                files = [
+                    p for p in pred.iterdir()
+                    if p.stem == sid
+                    and p.suffix.lower() in ('.wav', '.flac', '.mp3')
+                ]
+
+                if not files:
+                    raise FileNotFoundError(f'Audio not found: {sid}')
+
+                item = {
+                    'id': sid,
+                    'audio': str(files[0].resolve()),
+                    'text': row['caption'],
+                }
+                f.write(json.dumps(item, ensure_ascii=False) + '\n')
+
+        # Step 1: Extract tags using Qwen3-1.7B + vLLM
+        if not tags.exists():
+            cmd = [
+                'conda', 'run', '--no-capture-output',
+                '-n', 'mqascore_tags',
+                'python', 'MQAScore/scripts/extract_tags.py',
+                '--model', 'Qwen/Qwen3-1.7B',
+                '--input', str(captions),
+                '--output', str(tags),
+                '--limit', '1',
+                '--max-model-len', '4096',
+                '--max-new-tokens', '256',
+                '--gpu-memory-utilization', '0.85',
+            ]
+            run(cmd)
+
+        # Step 2: Score with Qwen2-Audio (4-bit)
+        cmd = [
+            'conda', 'run', '--no-capture-output',
+            '-n', 'mqascore_qwen2',
+            'python', 'MQAScore/scripts/score.py',
+            '--model', 'qwen2audio',
+            '--input', str(tags),
+            '--output', str(scores_path),
+            '--protocol', 'pertag',
+            '--fix-seconds', str(SECONDS),
+            '--limit', '1',
+        ]
+        run(cmd)
+
+        with scores_path.open(encoding='utf-8') as f:
+            data = [json.loads(line) for line in f if line.strip()]
+
+        if not data:
+            raise RuntimeError('MQAScore produced no results')
+
+        print('MQAScore test output:')
+        print(json.dumps(data[0], ensure_ascii=False, indent=2))
+
+        if 'mean_score' in data[0]:
+            result['MQAScore'] = sum(
+                float(item['mean_score']) for item in data
+            ) / len(data)
+        else:
+            print(
+                'No mean_score field found; '
+                'inspect the output schema before aggregation.'
+            )
+
+    path = output / 'metrics.json'
+    path.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+
+    print(json.dumps(result, indent=2))
+    print('Saved:', path)
 
 if __name__ == '__main__':
     main()
