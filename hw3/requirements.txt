@@ -7,9 +7,11 @@ torchsde==0.2.6
 sentencepiece==0.2.2
 soundfile==0.14.0
 
-numpy
-pandas
-soundfile
-tqdm
-librosa
-laion-clap
+huggingface_hub
+
+#numpy
+#pandas
+#soundfile
+#tqdm
+#librosa
+#laion-clap

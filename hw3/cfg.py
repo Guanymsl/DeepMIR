@@ -1,5 +1,6 @@
 """Classifier-free guidance (CFG) for Stable Audio Open. Implement `cfg` below."""
 
+
 def cfg(noise_pred_uncond, noise_pred_cond, guidance_scale):
     """TODO: combine the unconditional and conditional model outputs of one denoising step.
 
