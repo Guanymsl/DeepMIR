@@ -9,19 +9,14 @@ from common import read_captions, audio_files
 
 CAPTIONS_PATH = Path("test.csv")
 AUDIO_DIR = Path("audio_mp3")
-OUTPUT_PATH = Path("outputs/retrieval.json")
-CACHE_PATH = Path("outputs/musiccaps_embeddings.npz")
 CKPT_PATH = Path("av-benchmark/weights/music_audioset_epoch_15_esc_90.14.pt")
+OUTPUT_PATH = Path("outputs/retrieval.json")
 
 BATCH_SIZE = 8
 
-
 def normalize(x):
     x = np.asarray(x, dtype=np.float32)
-    return x / np.maximum(
-        np.linalg.norm(x, axis=1, keepdims=True), 1e-12
-    )
-
+    return x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-12)
 
 def load_clap():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -31,12 +26,11 @@ def load_clap():
         amodel="HTSAT-base",
         device=device,
     )
-    model.load_ckpt(str(CKPT))
+    model.load_ckpt(str(CKPT_PATH))
     model.eval()
 
     print(f"CLAP loaded on {device}")
     return model
-
 
 def embed_text(model, captions):
     embeddings = []
@@ -48,7 +42,6 @@ def embed_text(model, captions):
             embeddings.append(np.asarray(emb))
 
     return np.concatenate(embeddings, axis=0)
-
 
 def embed_audio(model, files):
     embeddings = []
@@ -70,44 +63,13 @@ def embed_audio(model, files):
 
     return np.concatenate(embeddings, axis=0)
 
-
 def main():
     rows = read_captions(CAPTIONS_PATH)
     files = audio_files(AUDIO_DIR)
-
-    if not rows:
-        raise ValueError("No captions found")
-    if not files:
-        raise ValueError("No audio files found")
-    if not CKPT.exists():
-        raise FileNotFoundError(f"CLAP checkpoint not found: {CKPT}")
-
     names = [f.stem for f in files]
-    paths = [str(f.resolve()) for f in files]
-    checkpoint = str(CKPT.resolve())
 
     model = load_clap()
-    audio_emb = None
-
-    if CACHE_PATH.exists():
-        with np.load(CACHE_PATH, allow_pickle=False) as z:
-            if (
-                list(z["paths"]) == paths
-                and str(z["checkpoint"]) == checkpoint
-            ):
-                audio_emb = z["embeddings"]
-                print("Reusing cached MusicCaps embeddings")
-
-    if audio_emb is None:
-        audio_emb = embed_audio(model, files)
-
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            CACHE_PATH,
-            paths=np.array(paths),
-            embeddings=audio_emb,
-            checkpoint=checkpoint,
-        )
+    audio_emb = embed_audio(model, files)
 
     captions = [caption for _, caption in rows]
     text_emb = embed_text(model, captions)
@@ -130,7 +92,6 @@ def main():
     )
 
     print(f"Saved {len(result)} results to {OUTPUT_PATH}")
-
 
 if __name__ == "__main__":
     main()

@@ -26,11 +26,14 @@ With a correct implementation the difference is `0` (written in the same form as
 Note: Stable Audio Open is a v-prediction model, so the model outputs are v rather than noise. CFG is linear, so the
 formula is the same.
 
-change to music_audioset_epoch_15_esc_90.14.pt in extraction_models.py
+change to music_audioset_epoch_15_esc_90.14.pt in extraction_models.py 放進weights
 python3 prepare.py
+
 關閉 Thinking Mode
 FP16 BatchNorm 問題	BatchNorm 維持 FP32
 FP16 attention mask overflow	修改 helpers.py
+FP16 -> BF16
+
 inference_af2_05b.yaml 裡面的 Language Model 和 Tokenizer 改成：
 lang_encoder_path: Qwen/Qwen2.5-0.5B
 tokenizer_path: Qwen/Qwen2.5-0.5B

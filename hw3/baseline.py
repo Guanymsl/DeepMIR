@@ -25,7 +25,7 @@ def main():
     args = parse_args()
 
     dtype = torch.float16
-    device = "cuda"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
