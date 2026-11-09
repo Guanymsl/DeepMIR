@@ -149,29 +149,23 @@ def main():
         mqa_output = output / 'mqascore'
         mqa_output.mkdir(parents=True, exist_ok=True)
 
-        captions = mqa_output / 'captions_test.jsonl'
-        tags = mqa_output / 'tags_test.jsonl'
-        scores_path = mqa_output / 'af2_test.jsonl'
+        captions = mqa_output / 'captions.jsonl'
+        tags = mqa_output / 'tags.jsonl'
+        scores_path = mqa_output / 'scores.jsonl'
 
         with CAPTIONS_PATH.open(newline='', encoding='utf-8') as f:
-            rows = list(csv.DictReader(f))[:1]
+            caption_map = {
+                str(row['name']): row['caption']
+                for row in csv.DictReader(f)
+            }
 
         with captions.open('w', encoding='utf-8') as f:
-            for row in rows:
-                sid = str(row['name'])
-                files = [
-                    p for p in pred.iterdir()
-                    if p.stem == sid
-                    and p.suffix.lower() in ('.wav', '.flac', '.mp3')
-                ]
-
-                if not files:
-                    raise FileNotFoundError(f'Audio not found: {sid}')
-
+            for sid in sorted(caption_map, key=int):
+                audio = pred / f'{sid}.wav'
                 item = {
                     'id': sid,
-                    'audio': str(files[0].resolve()),
-                    'text': row['caption'],
+                    'audio': str(audio.resolve()),
+                    'text': caption_map[sid],
                 }
                 f.write(json.dumps(item, ensure_ascii=False) + '\n')
 
@@ -183,21 +177,11 @@ def main():
                 '--model', 'Qwen/Qwen3-1.7B',
                 '--input', str(captions),
                 '--output', str(tags),
-                '--limit', '1',
                 '--max-model-len', '4096',
                 '--max-new-tokens', '1024',
                 '--gpu-memory-utilization', '0.85',
             ]
             run(cmd)
-            
-        with tags.open(encoding='utf-8') as f:
-            tag_data = [json.loads(line) for line in f if line.strip()]
-
-        if not tag_data:
-            raise RuntimeError('MQAScore tag extraction produced no results')
-
-        if any('error' in item for item in tag_data):
-            raise RuntimeError(f'MQAScore tag extraction failed: {tag_data}')
 
         cmd = [
             'conda', 'run', '--no-capture-output',
@@ -208,28 +192,14 @@ def main():
             '--output', str(scores_path),
             '--protocol', 'pertag',
             '--fix-seconds', str(SECONDS),
-            '--limit', '1',
         ]
         run(cmd)
 
         with scores_path.open(encoding='utf-8') as f:
             data = [json.loads(line) for line in f if line.strip()]
 
-        if not data:
-            raise RuntimeError('MQAScore produced no results')
-
-        print('MQAScore test output:')
-        print(json.dumps(data[0], ensure_ascii=False, indent=2))
-
-        if 'mean_score' in data[0]:
-            result['MQAScore'] = sum(
-                float(item['mean_score']) for item in data
-            ) / len(data)
-        else:
-            print(
-                'No mean_score field found; '
-                'inspect the output schema before aggregation.'
-            )
+        result['MQAScore'] = sum(float(item['mean_score']) for item in data) / len(data)
+        print(f'MQAScore : 'f"{result['MQAScore']:.6f}")
 
     path = output / 'metrics.json'
     path.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')

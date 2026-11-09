@@ -20,7 +20,7 @@ class AudioFlamingo2Backend(LALMBackend):
         self.model_id = model_id or self.model_id
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.dtype = (
-            torch.float16 if self.device.type == "cuda"
+            torch.bfloat16 if self.device.type == "cuda"
             else torch.float32
         )
 
@@ -149,7 +149,7 @@ class AudioFlamingo2Backend(LALMBackend):
 
             with torch.autocast(
                 device_type="cuda",
-                dtype=torch.float16,
+                dtype=self.dtype,
                 enabled=(self.device.type == "cuda"),
             ):
                 outputs = self.model(
