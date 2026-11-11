@@ -14,8 +14,8 @@ def normalize_tags(tags, attributes):
         seen = set()
         for el in tags.get(attr) or []:
             if isinstance(el, dict):
-                tag = el.get("entity")
-                extra = {k: v for k, v in el.items() if k != "entity"}
+                tag = el.get('entity')
+                extra = {k: v for k, v in el.items() if k != 'entity'}
             else:
                 tag, extra = el, {}
             if not isinstance(tag, str) or not tag.strip():

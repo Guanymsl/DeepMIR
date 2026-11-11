@@ -57,11 +57,11 @@ class FlamingoLayer(nn.Module):
     ):
         if self.gated_cross_attn_layer_sound is not None:
             if self.sound_x is None:
-                raise ValueError("sound_x must be conditioned before forward pass")
+                raise ValueError('sound_x must be conditioned before forward pass')
 
             if self.media_locations is None:
                 raise ValueError(
-                    "media_locations must be conditioned before forward pass"
+                    'media_locations must be conditioned before forward pass'
                 )
 
             lang_x = self.gated_cross_attn_layer_sound(
@@ -147,7 +147,7 @@ class FlamingoLMMixin(nn.Module):
         """Condition the Flamingo layers on the media locations before forward()"""
         if not self.initialized_flamingo:
             raise ValueError(
-                "Flamingo layers are not initialized. Please call `init_flamingo` first."
+                'Flamingo layers are not initialized. Please call `init_flamingo` first.'
             )
 
         media_locations = input_ids == self.media_token_id
@@ -163,8 +163,8 @@ class FlamingoLMMixin(nn.Module):
                 layer.condition_media_locations(media_locations)
             layer.condition_use_cached_media(use_cached_media_locations)
 
-        kwargs["input_ids"] = input_ids
-        kwargs["attention_mask"] = attention_mask
+        kwargs['input_ids'] = input_ids
+        kwargs['attention_mask'] = attention_mask
         return super().forward(**kwargs)
 
     def is_conditioned(self) -> bool:

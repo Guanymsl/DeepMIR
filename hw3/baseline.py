@@ -8,9 +8,9 @@ from diffusers import StableAudioPipeline
 
 from common import read_captions
 
-MODEL_PATH = "stabilityai/stable-audio-open-1.0"
-CAPTIONS_PATH = Path("test.csv")
-OUTPUT_DIR = Path("outputs/generated/baseline")
+MODEL_PATH = 'stabilityai/stable-audio-open-1.0'
+CAPTIONS_PATH = Path('test.csv')
+OUTPUT_DIR = Path('outputs/generated/baseline')
 
 SEED = 42
 SECONDS = 20
@@ -25,7 +25,7 @@ def main():
     args = parse_args()
 
     dtype = torch.float16
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

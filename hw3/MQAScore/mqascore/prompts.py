@@ -17,38 +17,38 @@ from functools import lru_cache
 from pathlib import Path
 
 INSTRUCTION_DIR = Path(os.environ.get(
-    "MQASCORE_INSTRUCTION_DIR",
-    Path(__file__).resolve().parent.parent / "instructions"))
+    'MQASCORE_INSTRUCTION_DIR',
+    Path(__file__).resolve().parent.parent / 'instructions'))
 
 # All attributes that have a per-tag question template.
 ALL_ATTRIBUTES = [
-    "genre", "instrument", "mood_theme", "rhythm_tempo", "vocal",
-    "production_sound_quality", "context", "others",
+    'genre', 'instrument', 'mood_theme', 'rhythm_tempo', 'vocal',
+    'production_sound_quality', 'context', 'others',
 ]
 # Default attribute set for item-level MQAScore (the five axes used in our
 # MusicEval experiments). Pass `attributes=ALL_ATTRIBUTES` to use all eight.
-DEFAULT_ATTRIBUTES = ["genre", "instrument", "mood_theme", "vocal", "context"]
+DEFAULT_ATTRIBUTES = ['genre', 'instrument', 'mood_theme', 'vocal', 'context']
 
 
 @lru_cache(maxsize=None)
 def load_instruction(usage, strip_newline=True):
-    path = INSTRUCTION_DIR / f"instruction_{usage}.txt"
+    path = INSTRUCTION_DIR / f'instruction_{usage}.txt'
     if not path.exists():
-        raise FileNotFoundError(f"missing instruction file: {path}")
-    text = path.read_text(encoding="utf-8")
-    if strip_newline and text.endswith("\n"):
+        raise FileNotFoundError(f'missing instruction file: {path}')
+    text = path.read_text(encoding='utf-8')
+    if strip_newline and text.endswith('\n'):
         text = text[:-1]
     return text
 
 
 def system_prompt():
-    return load_instruction("lalm_system")
+    return load_instruction('lalm_system')
 
 
 def question_template(attribute):
     if attribute not in ALL_ATTRIBUTES:
-        raise KeyError(f"unknown attribute {attribute!r}; choose from {ALL_ATTRIBUTES}")
-    return load_instruction(f"lalm_pertag_{attribute}")
+        raise KeyError(f'unknown attribute {attribute!r}; choose from {ALL_ATTRIBUTES}')
+    return load_instruction(f'lalm_pertag_{attribute}')
 
 
 def pertag_question(attribute, tag):
@@ -56,21 +56,21 @@ def pertag_question(attribute, tag):
 
 
 def tag_extraction_instruction():
-    return load_instruction("llm_tag_extraction", strip_newline=False)
+    return load_instruction('llm_tag_extraction', strip_newline=False)
 
 
 def text_protocol(granularity, attributes=None):
     """Text-side settings recorded in the output's .meta.json."""
-    p = {"system_prompt": system_prompt(), "granularity": granularity}
-    if granularity == "pertag":
-        p["attributes"] = list(attributes)
-        p["question_templates"] = {a: question_template(a) for a in attributes}
+    p = {'system_prompt': system_prompt(), 'granularity': granularity}
+    if granularity == 'pertag':
+        p['attributes'] = list(attributes)
+        p['question_templates'] = {a: question_template(a) for a in attributes}
     return p
 
 
-if __name__ == "__main__":
-    print(f"instruction dir: {INSTRUCTION_DIR}")
-    print(f"system : {system_prompt()}")
+if __name__ == '__main__':
+    print(f'instruction dir: {INSTRUCTION_DIR}')
+    print(f'system : {system_prompt()}')
     for a in ALL_ATTRIBUTES:
         print(f"{a:<26}: {pertag_question(a, 'jazz')}")
-    print(f"tag-extraction instruction: {len(tag_extraction_instruction())} chars")
+    print(f'tag-extraction instruction: {len(tag_extraction_instruction())} chars')

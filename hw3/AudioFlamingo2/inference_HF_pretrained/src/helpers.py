@@ -348,7 +348,7 @@ class MaskedCrossAttention(nn.Module):
         if not use_cached_media:
             assert (
                 media_locations.shape[1] == x.shape[1]
-            ), f"media_location.shape is {media_locations.shape} but x.shape is {x.shape}"
+            ), f'media_location.shape is {media_locations.shape} but x.shape is {x.shape}'
 
         T_txt = x.shape[1]
         B, L = media.shape[:2]
@@ -359,17 +359,17 @@ class MaskedCrossAttention(nn.Module):
         x = self.norm(x)
 
         q = self.to_q(x)
-        media = rearrange(media, "b t n d -> b (t n) d")
+        media = rearrange(media, 'b t n d -> b (t n) d')
 
         k, v = self.to_kv(media).chunk(2, dim=-1)
-        q, k, v = rearrange_many((q, k, v), "b n (h d) -> b h n d", h=h)
+        q, k, v = rearrange_many((q, k, v), 'b n (h d) -> b h n d', h=h)
 
         q = q * self.scale
 
-        sim = einsum("... i d, ... j d -> ... i j", q, k)
+        sim = einsum('... i d, ... j d -> ... i j', q, k)
 
         # mask padded audio embeddings
-        media_mask = rearrange(media_mask, "b i n -> b 1 1 (i n)").bool()  # n = 1 is extra dim
+        media_mask = rearrange(media_mask, 'b i n -> b 1 1 (i n)').bool()  # n = 1 is extra dim
         sim = sim.masked_fill(~media_mask, -torch.finfo(sim.dtype).max)
 
         assert self.only_attend_immediate_media is False
@@ -380,12 +380,12 @@ class MaskedCrossAttention(nn.Module):
         if exists(media_locations) and self.only_attend_immediate_media:
             text_without_media_mask = text_time == 0
             text_without_media_mask = rearrange(
-                text_without_media_mask, "b i -> b 1 i 1"
+                text_without_media_mask, 'b i -> b 1 i 1'
             )
             attn = attn.masked_fill(text_without_media_mask, 0.0)
 
-        out = einsum("... i j, ... j d -> ... i d", attn, v)
-        out = rearrange(out, "b h n d -> b n (h d)")
+        out = einsum('... i j, ... j d -> ... i d', attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
 

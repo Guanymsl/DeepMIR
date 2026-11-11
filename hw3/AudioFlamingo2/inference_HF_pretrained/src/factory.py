@@ -34,7 +34,7 @@ except ImportError:
     from utils import extend_instance
 
 # Ensure correct module path inclusion
-sys.path.append("../")
+sys.path.append('../')
 
 def int16_to_float32(x):
     return (x / 32767.0).astype(np.float32)
@@ -51,8 +51,8 @@ def float32_to_int16_torch(x):
     return (x * 32767.).type(torch.int16)
 
 class CLAPAudioCfp:
-    model_type: str = "HTSAT"
-    model_name: str = "large"
+    model_type: str = 'HTSAT'
+    model_name: str = 'large'
     sample_rate: int = 16000
     audio_length: int = 1024
     window_size: int = 1024
@@ -70,7 +70,7 @@ class CLAP(nn.Module):
 
         self.clap_config = clap_config
 
-        self.method = clap_config["method"]
+        self.method = clap_config['method']
         device_id = f'cuda:{torch.cuda.current_device()}'
 
         if ('finetune' in clap_config) and clap_config['finetune']:
@@ -81,9 +81,9 @@ class CLAP(nn.Module):
 
         audio_cfg = CLAPAudioCfp()
         enable_fusion = True
-        fusion_type = "aff_2d"
+        fusion_type = 'aff_2d'
         self.nvclap = create_htsat_model(audio_cfg, enable_fusion, fusion_type)
-        clap_state_dict = torch.load(clap_config["checkpoint"], map_location = 'cpu')
+        clap_state_dict = torch.load(clap_config['checkpoint'], map_location = 'cpu')
         clap_state_dict_copy = clap_state_dict['state_dict'].copy()
         for key in list(clap_state_dict['state_dict'].keys()):
             if 'audio' in key:
@@ -102,7 +102,7 @@ class CLAP(nn.Module):
         else:
             self.nvclap.eval()
 
-        print('loaded NVCLAP model: {}'.format(clap_config["checkpoint"]))
+        print('loaded NVCLAP model: {}'.format(clap_config['checkpoint']))
                 
     def get_mel(self, audio_data):
 
@@ -113,7 +113,7 @@ class CLAP(nn.Module):
             win_length=1024,
             hop_length=160,
             center=True,
-            pad_mode="reflect",
+            pad_mode='reflect',
             power=2.0,
             norm=None,
             onesided=True,
@@ -134,9 +134,9 @@ class CLAP(nn.Module):
         grad_fn = suppress if require_grad else torch.no_grad
         with grad_fn():
             if len(audio_data) > max_len:
-                if data_truncating == "rand_trunc":
+                if data_truncating == 'rand_trunc':
                     longer = torch.tensor([True])
-                elif data_truncating == "fusion":
+                elif data_truncating == 'fusion':
                     # fusion
                     mel = self.get_mel(audio_data)
                     # split to three parts
@@ -147,7 +147,7 @@ class CLAP(nn.Module):
                         # larger than max_len but smaller than max_len+hop_size.
                         # In this case, we just use the whole audio.
                         mel_fusion = torch.stack([mel, mel, mel, mel], dim=0)
-                        sample["mel_fusion"] = mel_fusion
+                        sample['mel_fusion'] = mel_fusion
                         longer = torch.tensor([False])
                     else:
                         ranges = np.array_split(list(range(0, total_frames - chunk_frames + 1)), 3)
@@ -172,11 +172,11 @@ class CLAP(nn.Module):
 
                         # stack
                         mel_fusion = torch.stack([mel_shrink, mel_chunk_front, mel_chunk_middle, mel_chunk_back], dim=0)
-                        sample["mel_fusion"] = mel_fusion
+                        sample['mel_fusion'] = mel_fusion
                         longer = torch.tensor([True])
                 else:
                     raise NotImplementedError(
-                        f"data_truncating {data_truncating} not implemented"
+                        f'data_truncating {data_truncating} not implemented'
                     )
                 # random crop to max_len (for compatibility)
                 overflow = len(audio_data) - max_len
@@ -185,7 +185,7 @@ class CLAP(nn.Module):
 
             else:  # padding if too short
                 if len(audio_data) < max_len:  # do nothing if equal
-                    if data_filling == "repeatpad":
+                    if data_filling == 'repeatpad':
                         n_repeat = int(max_len / len(audio_data))
                         audio_data = audio_data.repeat(n_repeat)
                         # audio_data = audio_data.unsqueeze(0).unsqueeze(0).unsqueeze(0)
@@ -193,31 +193,31 @@ class CLAP(nn.Module):
                         audio_data = F.pad(
                             audio_data,
                             (0, max_len - len(audio_data)),
-                            mode="constant",
+                            mode='constant',
                             value=0,
                         )
-                    elif data_filling == "pad":
+                    elif data_filling == 'pad':
                         audio_data = F.pad(
                             audio_data,
                             (0, max_len - len(audio_data)),
-                            mode="constant",
+                            mode='constant',
                             value=0,
                         )
-                    elif data_filling == "repeat":
+                    elif data_filling == 'repeat':
                         n_repeat = int(max_len / len(audio_data))
                         audio_data = audio_data.repeat(n_repeat + 1)[:max_len]
                     else:
                         raise NotImplementedError(
-                            f"data_filling {data_filling} not implemented"
+                            f'data_filling {data_filling} not implemented'
                         )
                 if data_truncating == 'fusion':
                     mel = self.get_mel(audio_data)
                     mel_fusion = torch.stack([mel, mel, mel, mel], dim=0)
-                    sample["mel_fusion"] = mel_fusion
+                    sample['mel_fusion'] = mel_fusion
                 longer = torch.tensor([False])
 
-        sample["longer"] = longer
-        sample["waveform"] = audio_data
+        sample['longer'] = longer
+        sample['waveform'] = audio_data
 
         return sample
 
@@ -229,13 +229,13 @@ class CLAP(nn.Module):
         processed_clips = []
         for clip in clips:
             audio_data = int16_to_float32_torch(float32_to_int16_torch(clip))
-            sample = self.get_audio_features({}, audio_data, 160000, "fusion", "repeatpad")
+            sample = self.get_audio_features({}, audio_data, 160000, 'fusion', 'repeatpad')
             processed_clips.append(sample)
 
         waveforms = {}
-        waveforms["mel_fusion"] = torch.stack([item["mel_fusion"] for item in processed_clips], dim=0)
-        waveforms["longer"] = torch.stack([item["longer"] for item in processed_clips], dim=0)
-        waveforms["waveform"] = torch.stack([item["waveform"] for item in processed_clips], dim=0)
+        waveforms['mel_fusion'] = torch.stack([item['mel_fusion'] for item in processed_clips], dim=0)
+        waveforms['longer'] = torch.stack([item['longer'] for item in processed_clips], dim=0)
+        waveforms['waveform'] = torch.stack([item['waveform'] for item in processed_clips], dim=0)
 
         return waveforms
 
@@ -282,17 +282,17 @@ def create_model_and_transforms(
         cache_dir=cache_dir,
     )
     text_tokenizer.add_special_tokens(
-        {"additional_special_tokens": ["<audio>", "<|endofchunk|>", "<|PAD_TOKEN|>"]}
+        {'additional_special_tokens': ['<audio>', '<|endofchunk|>', '<|PAD_TOKEN|>']}
     )
 
     text_tokenizer.pad_token = None
     text_tokenizer.pad_token_id = None
 
-    text_tokenizer.pad_token = "<|PAD_TOKEN|>"
-    text_tokenizer.pad_token_id = text_tokenizer.encode("<|PAD_TOKEN|>")[-1]
+    text_tokenizer.pad_token = '<|PAD_TOKEN|>'
+    text_tokenizer.pad_token_id = text_tokenizer.encode('<|PAD_TOKEN|>')[-1]
 
     if text_tokenizer.sep_token is None:
-        text_tokenizer.add_special_tokens({"sep_token": "<SEP>"})
+        text_tokenizer.add_special_tokens({'sep_token': '<SEP>'})
 
     lang_encoder = AutoModelForCausalLM.from_pretrained(
         lang_encoder_path,
@@ -317,10 +317,10 @@ def create_model_and_transforms(
         clap,
         unfreeze_clap,
         lang_encoder,
-        text_tokenizer.encode("<|endofchunk|>")[-1],
-        text_tokenizer.encode("<audio>")[-1],
+        text_tokenizer.encode('<|endofchunk|>')[-1],
+        text_tokenizer.encode('<audio>')[-1],
         text_tokenizer.sep_token_id,
-        clap_embed_dim = clap_config["audio_embed_dim"],
+        clap_embed_dim = clap_config['audio_embed_dim'],
         audio_transformer_kwargs=audio_transformer_kwargs, 
         cross_attn_every_n_layers=cross_attn_every_n_layers,
         **flamingo_kwargs,
@@ -343,7 +343,7 @@ def create_model_and_transforms(
         model.clap.requires_grad_(True)
 
 
-    print("Flamingo model initialized with {:,} trainable parameters (audio transformer has {:,}, LM has {:,})".format(
+    print('Flamingo model initialized with {:,} trainable parameters (audio transformer has {:,}, LM has {:,})'.format(
         sum(p.numel() for p in model.parameters() if p.requires_grad),
         sum(p.numel() for p in model.audio_transformer_clap.parameters() if p.requires_grad),
         sum(p.numel() for p in model.lang_encoder.parameters() if p.requires_grad),
@@ -358,30 +358,30 @@ def _infer_decoder_layers_attr_name(model):
             return __KNOWN_DECODER_LAYERS_ATTR_NAMES[k]
 
     raise ValueError(
-        f"We require the attribute name for the nn.ModuleList in the decoder storing the transformer block layers. Please supply this string manually."
+        f'We require the attribute name for the nn.ModuleList in the decoder storing the transformer block layers. Please supply this string manually.'
     )
 
 
 __KNOWN_DECODER_LAYERS_ATTR_NAMES = {
-    "opt": "model.decoder.layers",
-    "gptj": "transformer.h",
-    "gpt-j": "transformer.h",
-    "pythia": "gpt_neox.layers",
-    "llama": "model.layers",
-    "gptneoxforcausallm": "gpt_neox.layers",
-    "mpt": "transformer.blocks",
-    "mosaicgpt": "transformer.blocks",
-    "qwen": "model.layers",
+    'opt': 'model.decoder.layers',
+    'gptj': 'transformer.h',
+    'gpt-j': 'transformer.h',
+    'pythia': 'gpt_neox.layers',
+    'llama': 'model.layers',
+    'gptneoxforcausallm': 'gpt_neox.layers',
+    'mpt': 'transformer.blocks',
+    'mosaicgpt': 'transformer.blocks',
+    'qwen': 'model.layers',
 }
 
 
 if __name__ == '__main__':
     import torch
-    torch.set_printoptions(profile="full")  # only in debug mode
+    torch.set_printoptions(profile='full')  # only in debug mode
     import sys 
     sys.path.append('../')
     import os
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     import yaml
     import argparse
 
@@ -392,8 +392,8 @@ if __name__ == '__main__':
     config = yaml.load(open(args.config), Loader=yaml.FullLoader)
 
     data_config = config['data_config']
-    model_config = config["model_config"]
-    clap_config = config["clap_config"]
+    model_config = config['model_config']
+    clap_config = config['clap_config']
 
     model, tokenizer = create_model_and_transforms(
         **model_config,
@@ -416,10 +416,10 @@ if __name__ == '__main__':
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, collate_fn=data_collator, num_workers=4)
 
     for step, batch in enumerate(trainloader):
-        audio_clips = batch["audio_clips"].cuda()
-        audio_embed_mask = batch["audio_embed_mask"].cuda()
-        input_ids = batch["input_ids"].cuda()
-        attention_mask = batch["attention_mask"].cuda()
+        audio_clips = batch['audio_clips'].cuda()
+        audio_embed_mask = batch['audio_embed_mask'].cuda()
+        input_ids = batch['input_ids'].cuda()
+        attention_mask = batch['attention_mask'].cuda()
 
         print('batch {}:'.format(step+1), audio_clips.shape, audio_embed_mask.shape, input_ids.shape, attention_mask.shape)
 
@@ -427,17 +427,17 @@ if __name__ == '__main__':
 
         labels[labels == tokenizer.pad_token_id] = -100
         labels[:, :2] = -100
-        labels[labels == tokenizer.encode("<audio>")[-1]] = -100
+        labels[labels == tokenizer.encode('<audio>')[-1]] = -100
 
         sep_locations = labels == tokenizer.sep_token_id
-        endofchunk_token_id = tokenizer.encode("<|endofchunk|>")[-1]
+        endofchunk_token_id = tokenizer.encode('<|endofchunk|>')[-1]
         eoc_locations = labels == endofchunk_token_id
 
         if not all(sep_locations.sum(dim=1) == eoc_locations.sum(dim=1)):
-            print("Warning: sep loc {} but eoc loc {}".format(sep_locations.sum(dim=1), eoc_locations.sum(dim=1)))
+            print('Warning: sep loc {} but eoc loc {}'.format(sep_locations.sum(dim=1), eoc_locations.sum(dim=1)))
             
             for input_id in labels:
-                input_id[input_id==-100] = tokenizer.encode("-")[-1]
+                input_id[input_id==-100] = tokenizer.encode('-')[-1]
                 print(input_id, '\n', tokenizer.decode(input_id))
 
         for i in range(labels.shape[0]):

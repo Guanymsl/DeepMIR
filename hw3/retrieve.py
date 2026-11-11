@@ -7,10 +7,10 @@ from pathlib import Path
 
 from common import read_captions, audio_files
 
-CAPTIONS_PATH = Path("test.csv")
-AUDIO_DIR = Path("audio_mp3")
-CKPT_PATH = Path("av-benchmark/weights/music_audioset_epoch_15_esc_90.14.pt")
-OUTPUT_PATH = Path("outputs/retrieval.json")
+CAPTIONS_PATH = Path('test.csv')
+AUDIO_DIR = Path('audio_mp3')
+CKPT_PATH = Path('av-benchmark/weights/music_audioset_epoch_15_esc_90.14.pt')
+OUTPUT_PATH = Path('outputs/retrieval.json')
 
 BATCH_SIZE = 8
 
@@ -19,17 +19,17 @@ def normalize(x):
     return x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-12)
 
 def load_clap():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     model = laion_clap.CLAP_Module(
         enable_fusion=False,
-        amodel="HTSAT-base",
+        amodel='HTSAT-base',
         device=device,
     )
     model.load_ckpt(str(CKPT_PATH))
     model.eval()
 
-    print(f"CLAP loaded on {device}")
+    print(f'CLAP loaded on {device}')
     return model
 
 def embed_text(model, captions):
@@ -57,8 +57,8 @@ def embed_audio(model, files):
             embeddings.append(np.asarray(emb))
 
             print(
-                f"Audio embedded: "
-                f"{min(start + BATCH_SIZE, len(files))}/{len(files)}"
+                f'Audio embedded: '
+                f'{min(start + BATCH_SIZE, len(files))}/{len(files)}'
             )
 
     return np.concatenate(embeddings, axis=0)
@@ -87,11 +87,11 @@ def main():
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(
-        json.dumps(result, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+        json.dumps(result, indent=2, ensure_ascii=False) + '\n',
+        encoding='utf-8',
     )
 
-    print(f"Saved {len(result)} results to {OUTPUT_PATH}")
+    print(f'Saved {len(result)} results to {OUTPUT_PATH}')
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

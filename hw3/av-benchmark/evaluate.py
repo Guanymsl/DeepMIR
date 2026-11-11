@@ -12,7 +12,7 @@ from av_bench.extract import extract
 log = logging.getLogger()
 device = 'cuda'
 
-LOGFORMAT = "[%(log_color)s%(levelname)-8s%(reset)s]: %(log_color)s%(message)s%(reset)s"
+LOGFORMAT = '[%(log_color)s%(levelname)-8s%(reset)s]: %(log_color)s%(message)s%(reset)s'
 
 
 def setup_eval_logging(log_level: int = logging.INFO):

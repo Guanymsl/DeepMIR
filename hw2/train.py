@@ -33,20 +33,20 @@ class RandomWindowDataset(Dataset):
         return torch.tensor(window[:-1], dtype=torch.long), torch.tensor(window[1:], dtype=torch.long)
 
 def load(path):
-    with path.open(encoding="utf-8") as f:
+    with path.open(encoding='utf-8') as f:
         records = json.load(f)
 
     songs = []
     for record in records:
-        sequences = record.get("sequences", [])
-        ids = sequences[0]["ids"]
+        sequences = record.get('sequences', [])
+        ids = sequences[0]['ids']
         songs.append(ids)
     return songs
 
 def run_epoch(model, loader, optimizer, device, train, grad_clip):
     model.train(train)
     total_loss, total_tokens = 0.0, 0
-    for x, y in tqdm(loader, desc="Train" if train else "Valid", leave=False):
+    for x, y in tqdm(loader, desc='Train' if train else 'Valid', leave=False):
         x, y = x.to(device), y.to(device)
         with torch.set_grad_enabled(train):
             logits = model(input_ids=x, use_cache=False).logits
@@ -61,9 +61,9 @@ def run_epoch(model, loader, optimizer, device, train, grad_clip):
         total_tokens += tokens
     return total_loss / total_tokens
 
-TOKENS_PATH = Path("outputs/tokens/tokens.json")
-TOKENIZER_PATH = Path("outputs/tokens/tokenizer.json")
-OUTPUT_DIR = Path("outputs/checkpoints")
+TOKENS_PATH = Path('outputs/tokens/tokens.json')
+TOKENIZER_PATH = Path('outputs/tokens/tokenizer.json')
+OUTPUT_DIR = Path('outputs/checkpoints')
 
 CONTEXT_LENGTH = 1024
 SAMPLES_PER_SONG = 16
@@ -86,7 +86,7 @@ LR = 3e-4
 def main():
     random.seed(SEED)
     torch.manual_seed(SEED)
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 
     tokenizer = REMI(params=str(TOKENIZER_PATH))
     vocab_size = len(tokenizer)
@@ -117,30 +117,30 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Device: {device} | Songs: {len(train_songs)} train / {len(val_songs)} val")
+    print(f'Device: {device} | Songs: {len(train_songs)} train / {len(val_songs)} val')
 
     best_val = math.inf
     history = []
     for epoch in range(1, EPOCHS + 1):
         train_loss = run_epoch(model, train_loader, optimizer, device, True, GRAD_CLIP)
         val_loss = run_epoch(model, val_loader, optimizer, device, False, GRAD_CLIP)
-        print(f"Epoch {epoch:03d}/{EPOCHS} | train_loss={train_loss:.4f} | val_loss={val_loss:.4f} | val_ppl={math.exp(min(val_loss, 50)):.2f}")
-        history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
+        print(f'Epoch {epoch:03d}/{EPOCHS} | train_loss={train_loss:.4f} | val_loss={val_loss:.4f} | val_ppl={math.exp(min(val_loss, 50)):.2f}')
+        history.append({'epoch': epoch, 'train_loss': train_loss, 'val_loss': val_loss})
 
-        checkpoint = {"model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
-                      "model_config": config.to_dict(), "epoch": epoch, "val_loss": val_loss,
-                      "tokenizer_path": str(TOKENIZER_PATH)}
+        checkpoint = {'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
+                      'model_config': config.to_dict(), 'epoch': epoch, 'val_loss': val_loss,
+                      'tokenizer_path': str(TOKENIZER_PATH)}
 
-        torch.save(checkpoint, OUTPUT_DIR / "last.pt")
+        torch.save(checkpoint, OUTPUT_DIR / 'last.pt')
 
         if val_loss < best_val:
             best_val = val_loss
-            torch.save(checkpoint, OUTPUT_DIR / "best.pt")
+            torch.save(checkpoint, OUTPUT_DIR / 'best.pt')
 
-        with (OUTPUT_DIR / "history.json").open("w", encoding="utf-8") as f:
+        with (OUTPUT_DIR / 'history.json').open('w', encoding='utf-8') as f:
             json.dump(history, f, indent=2)
 
-    print(f"Done. Best validation loss: {best_val:.4f} | Saved to {OUTPUT_DIR}")
+    print(f'Done. Best validation loss: {best_val:.4f} | Saved to {OUTPUT_DIR}')
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

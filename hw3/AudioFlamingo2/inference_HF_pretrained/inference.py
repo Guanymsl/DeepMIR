@@ -17,14 +17,14 @@ def float32_to_int16(x):
     x = np.clip(x, a_min=-1., a_max=1.)
     return (x * 32767.).astype(np.int16)
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 
 def get_num_windows(T, sr, clap_config):
 
-    window_length  = int(float(clap_config["window_length"]) * sr)
-    window_overlap = int(float(clap_config["window_overlap"]) * sr)
-    max_num_window = int(clap_config["max_num_window"])
+    window_length  = int(float(clap_config['window_length']) * sr)
+    window_overlap = int(float(clap_config['window_overlap']) * sr)
+    max_num_window = int(clap_config['max_num_window'])
 
     num_windows = 1
     if T <= window_length:
@@ -59,7 +59,7 @@ def read_audio(file_path, target_sr, duration, start, clap_config):
         elif audio.sample_width == 4:
             data = data.astype(np.float32) / np.iinfo(np.int32).max
         else:
-            raise ValueError("Unsupported bit depth: {}".format(audio.sample_width))
+            raise ValueError('Unsupported bit depth: {}'.format(audio.sample_width))
 
     else:
         with sf.SoundFile(file_path) as audio:
@@ -95,10 +95,10 @@ def read_audio(file_path, target_sr, duration, start, clap_config):
 def load_audio(audio_path, clap_config):
 
     sr = 16000
-    window_length  = int(float(clap_config["window_length"]) * sr)
-    window_overlap = int(float(clap_config["window_overlap"]) * sr)
-    max_num_window = int(clap_config["max_num_window"])
-    duration = max_num_window * (clap_config["window_length"] - clap_config["window_overlap"]) + clap_config["window_overlap"]
+    window_length  = int(float(clap_config['window_length']) * sr)
+    window_overlap = int(float(clap_config['window_overlap']) * sr)
+    max_num_window = int(clap_config['max_num_window'])
+    duration = max_num_window * (clap_config['window_length'] - clap_config['window_overlap']) + clap_config['window_overlap']
 
     audio_data = read_audio(audio_path, sr, duration, 0.0, clap_config) # hard code audio start to 0.0
     T = len(audio_data)

@@ -14,7 +14,7 @@ _UNSET = object()
 
 class MQAScorer:
     def __init__(self, backend, attributes=None, fix_seconds=_UNSET,
-                 cache_dir=".mqascore_audio_cache"):
+                 cache_dir='.mqascore_audio_cache'):
         """
         backend:     a loaded backend from `mqascore.models.load_backend`.
         attributes:  attributes to score (default: DEFAULT_ATTRIBUTES).
@@ -37,21 +37,21 @@ class MQAScorer:
         per_attribute = {}
         for (attr, tag, extra), q, (p, ly, ln) in zip(flat, questions, scores):
             per_attribute.setdefault(attr, []).append(
-                {"tag": tag, "question": q, "score": p,
-                 "loglik_yes": ly, "loglik_no": ln, "extra": extra})
+                {'tag': tag, 'question': q, 'score': p,
+                 'loglik_yes': ly, 'loglik_no': ln, 'extra': extra})
         all_scores = [s[0] for s in scores]
         return {
-            "n_tags": len(all_scores),
-            "mean_score": sum(all_scores) / len(all_scores) if all_scores else None,
-            "attribute_mean": {a: sum(x["score"] for x in v) / len(v)
+            'n_tags': len(all_scores),
+            'mean_score': sum(all_scores) / len(all_scores) if all_scores else None,
+            'attribute_mean': {a: sum(x['score'] for x in v) / len(v)
                                for a, v in per_attribute.items()},
-            "per_attribute": per_attribute,
+            'per_attribute': per_attribute,
         }
 
     def protocol(self, granularity):
         p = self.backend.protocol()
         p.update(text_protocol(granularity, self.attributes))
-        p["fix_seconds"] = self.fix_seconds
-        p["audio_loading"] = ("original file" if self.fix_seconds is None else
-                              "librosa.load(mono, sr=22050) + zero-pad/truncate")
+        p['fix_seconds'] = self.fix_seconds
+        p['audio_loading'] = ('original file' if self.fix_seconds is None else
+                              'librosa.load(mono, sr=22050) + zero-pad/truncate')
         return p

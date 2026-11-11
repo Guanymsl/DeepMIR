@@ -24,7 +24,7 @@ def prepare_audio(src, fix_seconds, cache_dir):
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha1(str(src.resolve()).encode()).hexdigest()[:12]
-    out = cache_dir / f"{src.stem}_{key}_fix{fix_seconds:g}.wav"
+    out = cache_dir / f'{src.stem}_{key}_fix{fix_seconds:g}.wav'
     if not out.exists():
         wav, sr = librosa.load(str(src), mono=True)
         target = int(round(fix_seconds * sr))
@@ -32,7 +32,7 @@ def prepare_audio(src, fix_seconds, cache_dir):
             wav = np.pad(wav, (0, target - len(wav)))
         else:
             wav = wav[:target]
-        tmp = out.with_name(out.stem + ".tmp.wav")
-        sf.write(str(tmp), wav, sr, format="WAV")
+        tmp = out.with_name(out.stem + '.tmp.wav')
+        sf.write(str(tmp), wav, sr, format='WAV')
         tmp.replace(out)
     return str(out)

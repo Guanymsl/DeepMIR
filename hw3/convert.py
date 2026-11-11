@@ -4,10 +4,10 @@ from pathlib import Path
 
 from common import read_captions
 
-CAPTIONS_PATH = Path("test.csv")
-INPUT_DIR = Path("outputs/generated")
-OUTPUT_DIR = Path("outputs/converted")
-BITRATE = "192k"
+CAPTIONS_PATH = Path('test.csv')
+INPUT_DIR = Path('outputs/generated')
+OUTPUT_DIR = Path('outputs/converted')
+BITRATE = '192k'
 
 def main():
     rows = read_captions(CAPTIONS_PATH)

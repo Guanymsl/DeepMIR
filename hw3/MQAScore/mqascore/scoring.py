@@ -10,8 +10,8 @@ well so other aggregations can be computed later.
 """
 import torch
 
-YES_WORDS = ["Yes", " Yes", "yes", " yes", "YES"]
-NO_WORDS = ["No", " No", "no", " no", "NO"]
+YES_WORDS = ['Yes', ' Yes', 'yes', ' yes', 'YES']
+NO_WORDS = ['No', ' No', 'no', ' no', 'NO']
 
 
 def first_token_ids(tokenizer, words):

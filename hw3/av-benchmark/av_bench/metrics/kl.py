@@ -24,7 +24,7 @@ def compute_kl(paired_logits: List[torch.Tensor], gt_logits: torch.Tensor):
             F.log_softmax(paired_samples, dim=1),
             # gt_logits.softmax(dim=1),
             F.log_softmax(gt_logits, dim=1),
-            reduction="sum",
+            reduction='sum',
             log_target=True,
         ) / len(paired_samples)
 
@@ -34,12 +34,12 @@ def compute_kl(paired_logits: List[torch.Tensor], gt_logits: torch.Tensor):
             F.logsigmoid(paired_samples),
             # gt_logits.sigmoid(),
             F.logsigmoid(gt_logits),
-            reduction="sum",
+            reduction='sum',
             log_target=True,
         ) / len(paired_samples)
 
     return {
-        "kl_sigmoid": float(kl_sigmoid),
-        "kl_softmax": float(kl_softmax),
+        'kl_sigmoid': float(kl_sigmoid),
+        'kl_softmax': float(kl_softmax),
         # "kl_ref": float(kl_ref),
     }

@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 def load_audio(path):
     audio, sample_rate = sf.read(
         str(path),
-        dtype="float32",
+        dtype='float32',
         always_2d=True,
     )
     waveform = torch.from_numpy(audio.T.copy())

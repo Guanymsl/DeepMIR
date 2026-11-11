@@ -36,17 +36,17 @@ class SkipSong(Exception):
 
 def make_oa_grids(n_pitch):
     return {
-        "DP":   np.arange(n_pitch),
-        "DV":   np.arange(N_CLASSES),
-        "DD":   np.arange(1, N_CLASSES + 1),
-        "DIOI": np.arange(1, N_CLASSES + 1),
+        'DP':   np.arange(n_pitch),
+        'DV':   np.arange(N_CLASSES),
+        'DD':   np.arange(1, N_CLASSES + 1),
+        'DIOI': np.arange(1, N_CLASSES + 1),
     }
 
 def time_to_beats(t, beat_times):
     t = np.asarray(t, dtype=float)
     beat_times = np.asarray(beat_times, dtype=float)
     if len(beat_times) < 2:
-        raise SkipSong("fewer than 2 beats")
+        raise SkipSong('fewer than 2 beats')
     b = np.interp(t, beat_times, np.arange(len(beat_times), dtype=float))
     first = beat_times[1] - beat_times[0]
     last = beat_times[-1] - beat_times[-2]
@@ -102,7 +102,7 @@ def pick_track(midi, name, fallback_idx):
             return inst
     if len(midi.instruments) > fallback_idx:
         return midi.instruments[fallback_idx]
-    raise SkipSong(f"no {name} track")
+    raise SkipSong(f'no {name} track')
 
 def parse_pop909_chord(chord_str):
     if chord_str == 'N':
@@ -116,8 +116,8 @@ def parse_pop909_chord(chord_str):
         return UNSUPPORTED_CHORD
     return root + 12 if quality.startswith('min') else root
 
-Chords = namedtuple("Chords", "starts ends labels")
-NoteArrays = namedtuple("NoteArrays", "starts ends pitches vels")
+Chords = namedtuple('Chords', 'starts ends labels')
+NoteArrays = namedtuple('NoteArrays', 'starts ends pitches vels')
 
 def load_gt_chords(path):
     rows = []
@@ -127,13 +127,13 @@ def load_gt_chords(path):
             if len(p) >= 3:
                 rows.append((float(p[0]), float(p[1]), parse_pop909_chord(p[2])))
     if not rows:
-        raise SkipSong("empty chord file")
+        raise SkipSong('empty chord file')
     rows.sort()
     a = np.array(rows)
     return Chords(a[:, 0], a[:, 1], a[:, 2].astype(int))
 
 def dominant_chord(ch, t0, t1):
-    i = int(np.searchsorted(ch.ends, t0, side="right"))
+    i = int(np.searchsorted(ch.ends, t0, side='right'))
     votes = {}
     while i < len(ch.starts) and ch.starts[i] < t1:
         ov = min(ch.ends[i], t1) - max(ch.starts[i], t0)
@@ -228,12 +228,12 @@ def track_features(notes, bars, n_pitch):
     u_onsets, u_bar = onsets[is_new], bar[is_new]
 
     return {
-        "P": pitches % 12 if n_pitch == 12 else pitches,
-        "V": np.minimum(vels // 4, N_CLASSES - 1),
-        "D": np.clip(np.round(e_ts - s_ts), 1, N_CLASSES),
-        "bar": bar,
-        "IOI": np.clip(np.diff(u_onsets), 1, N_CLASSES),
-        "IOI_bar": u_bar[1:],
+        'P': pitches % 12 if n_pitch == 12 else pitches,
+        'V': np.minimum(vels // 4, N_CLASSES - 1),
+        'D': np.clip(np.round(e_ts - s_ts), 1, N_CLASSES),
+        'bar': bar,
+        'IOI': np.clip(np.diff(u_onsets), 1, N_CLASSES),
+        'IOI_bar': u_bar[1:],
     }
 
 def _select(feat, key, bar_key, b):
@@ -245,7 +245,7 @@ def song_oa(gt_notes, gen_notes, bars, n_pitch=12):
     grids = make_oa_grids(n_pitch)
     f_gt = track_features(gt_notes, bars, n_pitch)
     f_gen = track_features(gen_notes, bars, n_pitch)
-    feature_keys = {"DP": ("P", "bar"), "DV": ("V", "bar"), "DD": ("D", "bar"), "DIOI": ("IOI", "IOI_bar")}
+    feature_keys = {'DP': ('P', 'bar'), 'DV': ('V', 'bar'), 'DD': ('D', 'bar'), 'DIOI': ('IOI', 'IOI_bar')}
 
     oa_sums = {k: 0.0 for k in grids}
     for b in range(bars.n_bars):

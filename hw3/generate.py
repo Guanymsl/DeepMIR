@@ -63,26 +63,26 @@ def generate(pipe, prompt, guidance_scale=7.0, num_inference_steps=100, audio_en
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt", required=True)
-    parser.add_argument("--scale", type=float, default=7.0)
-    parser.add_argument("--steps", type=int, default=100)
-    parser.add_argument("--seconds", type=float, default=10.0)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out", default="out.wav")
-    parser.add_argument("--check", action="store_true", help="compare with StableAudioPipeline")
+    parser.add_argument('--prompt', required=True)
+    parser.add_argument('--scale', type=float, default=7.0)
+    parser.add_argument('--steps', type=int, default=100)
+    parser.add_argument('--seconds', type=float, default=10.0)
+    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--out', default='out.wav')
+    parser.add_argument('--check', action='store_true', help='compare with StableAudioPipeline')
     args = parser.parse_args()
 
-    pipe = StableAudioPipeline.from_pretrained("stabilityai/stable-audio-open-1.0", torch_dtype=torch.float16)
-    pipe = pipe.to("cuda")
+    pipe = StableAudioPipeline.from_pretrained('stabilityai/stable-audio-open-1.0', torch_dtype=torch.float16)
+    pipe = pipe.to('cuda')
     audio = generate(pipe, args.prompt, args.scale, args.steps, args.seconds, args.seed)
     sf.write(args.out, audio.T.float().cpu().numpy(), pipe.vae.config.sampling_rate)
-    print(f"Saved to {args.out}")
+    print(f'Saved to {args.out}')
 
     if args.check:
         ref = pipe(args.prompt, num_inference_steps=args.steps, audio_end_in_s=args.seconds,
-                   guidance_scale=args.scale, generator=torch.Generator("cuda").manual_seed(args.seed)).audios[0]
-        print(f"max |diffusers - ours| = {(ref.float() - audio.float()).abs().max().item():.3e} (0 = identical)")
+                   guidance_scale=args.scale, generator=torch.Generator('cuda').manual_seed(args.seed)).audios[0]
+        print(f'max |diffusers - ours| = {(ref.float() - audio.float()).abs().max().item():.3e} (0 = identical)')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

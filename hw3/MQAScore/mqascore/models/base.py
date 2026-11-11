@@ -32,7 +32,7 @@ class LALMBackend:
 
     def protocol(self):
         """Model-side settings recorded in the output's .meta.json."""
-        return {"model": self.name, "model_id": self.model_id,
-                "model_class": type(self.model).__name__,
-                "yes_ids": self.yes_ids, "no_ids": self.no_ids,
-                "batch_size": 1}
+        return {'model': self.name, 'model_id': self.model_id,
+                'model_class': type(self.model).__name__,
+                'yes_ids': self.yes_ids, 'no_ids': self.no_ids,
+                'batch_size': 1}

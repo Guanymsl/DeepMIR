@@ -54,17 +54,17 @@ class Flamingo(nn.Module):
         self.unfreeze_clap = unfreeze_clap
         self.clap.requires_grad_(unfreeze_clap)
 
-        if hasattr(lang_encoder.config, "d_model"):
+        if hasattr(lang_encoder.config, 'd_model'):
             self.lang_dim = lang_encoder.config.d_model  # mpt uses d_model
         else:
             self.lang_dim = lang_encoder.config.hidden_size
 
         # define just one type of audio transformer
-        n_head = audio_transformer_kwargs["n_head"]
-        n_layers = audio_transformer_kwargs["n_layers"]
-        d_inner = audio_transformer_kwargs["d_inner"]
-        max_num_media = audio_transformer_kwargs["max_num_media"]
-        max_window_per_audio = audio_transformer_kwargs["max_window_per_audio"]
+        n_head = audio_transformer_kwargs['n_head']
+        n_layers = audio_transformer_kwargs['n_layers']
+        d_inner = audio_transformer_kwargs['d_inner']
+        max_num_media = audio_transformer_kwargs['max_num_media']
+        max_window_per_audio = audio_transformer_kwargs['max_window_per_audio']
         
         common_encoder_embed_dim = clap_embed_dim
 
@@ -115,16 +115,16 @@ class Flamingo(nn.Module):
     ):
         assert (
             self.lang_encoder.initialized_flamingo
-        ), "Flamingo layers are not initialized. Please call `init_flamingo` first."
+        ), 'Flamingo layers are not initialized. Please call `init_flamingo` first.'
 
         assert (
             self.lang_encoder._use_cached_audio_x or audio_x is not None
-        ), "Must provide either audio_x or have precached media using cache_media()."
+        ), 'Must provide either audio_x or have precached media using cache_media().'
 
         if self.lang_encoder._use_cached_audio_x:
             assert (
                 audio_x is None
-            ), "Expect audio_x to be None when media has been cached using cache_media(). Try uncache_media() first."
+            ), 'Expect audio_x to be None when media has been cached using cache_media(). Try uncache_media() first.'
             assert self.lang_encoder.is_conditioned()
 
         else:
@@ -152,14 +152,14 @@ class Flamingo(nn.Module):
         attention_mask: torch.Tensor = None,
         **kwargs,
     ):
-        num_beams = kwargs.pop("num_beams", 1)
+        num_beams = kwargs.pop('num_beams', 1)
         if num_beams > 1:
             audio_x = audio_x.repeat_interleave(num_beams, dim=0)
 
         self.lang_encoder._use_cached_audio_x = True
         self._encode_audio_x(audio_x=audio_x, audio_x_mask=audio_x_mask)
 
-        eos_token_id = kwargs.pop("eos_token_id", self.eoc_token_id)
+        eos_token_id = kwargs.pop('eos_token_id', self.eoc_token_id)
         output = self.lang_encoder.generate(
             input_ids=lang_x,
             attention_mask=attention_mask,
@@ -177,7 +177,7 @@ class Flamingo(nn.Module):
         rearrange code based on https://github.com/dhansmair/flamingo-mini
         """
 
-        assert audio_x.ndim == 3, "audio_x should be of shape (B, num_window, window_length)"
+        assert audio_x.ndim == 3, 'audio_x should be of shape (B, num_window, window_length)'
 
         #------------------------------------------------------------------------#
         # get embeddings from CLAP
@@ -190,7 +190,7 @@ class Flamingo(nn.Module):
         expanded_speech_mask = audio_x_mask.repeat_interleave(H, dim=1) # B, (LxH)
         if B > 1 and expanded_speech_mask.shape[0] == 1:
             expanded_speech_mask = expanded_speech_mask.repeat(B, 1)
-        assert expanded_speech_mask.shape[0] == B and expanded_speech_mask.shape[1] == L*H, "{} != ({},{})".format(expanded_speech_mask.shape, B, L*H)
+        assert expanded_speech_mask.shape[0] == B and expanded_speech_mask.shape[1] == L*H, '{} != ({},{})'.format(expanded_speech_mask.shape, B, L*H)
 
         #------------------------------------------------------------------------#
         audio_x_out = self.audio_transformer_clap(audio_x_out, causal_mask = expanded_speech_mask)  # B, LxH, D

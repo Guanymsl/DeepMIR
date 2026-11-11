@@ -18,9 +18,9 @@ def getattr_recursive(obj, att):
     Return nested attribute of obj
     Example: getattr_recursive(obj, 'a.b.c') is equivalent to obj.a.b.c
     """
-    if att == "":
+    if att == '':
         return obj
-    i = att.find(".")
+    i = att.find('.')
     if i < 0:
         return getattr(obj, att)
     else:
@@ -32,9 +32,9 @@ def setattr_recursive(obj, att, val):
     Set nested attribute of obj
     Example: setattr_recursive(obj, 'a.b.c', val) is equivalent to obj.a.b.c = val
     """
-    if "." in att:
-        obj = getattr_recursive(obj, ".".join(att.split(".")[:-1]))
-    setattr(obj, att.split(".")[-1], val)
+    if '.' in att:
+        obj = getattr_recursive(obj, '.'.join(att.split('.')[:-1]))
+    setattr(obj, att.split('.')[-1], val)
 
 
 def apply_with_stopping_condition(

@@ -18,19 +18,19 @@ from sklearn.svm import LinearSVC, SVC
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 
-MERT_MODEL = "m-a-p/MERT-v1-330M"
+MERT_MODEL = 'm-a-p/MERT-v1-330M'
 MERT_SAMPLE_RATE = 24000
 CROP_SECONDS = 15
 RANDOM_SEED = 42
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", required=True, choices=["A", "B"])
-    parser.add_argument("--pooling",required=True, choices=["mean", "meanstd"])
-    parser.add_argument("--layer", default="last")
-    parser.add_argument("--augment", action="store_true")
-    parser.add_argument("--acoustic", action="store_true")
-    parser.add_argument("--vocal", action="store_true")
+    parser.add_argument('--dataset', required=True, choices=['A', 'B'])
+    parser.add_argument('--pooling',required=True, choices=['mean', 'meanstd'])
+    parser.add_argument('--layer', default='last')
+    parser.add_argument('--augment', action='store_true')
+    parser.add_argument('--acoustic', action='store_true')
+    parser.add_argument('--vocal', action='store_true')
     return parser.parse_args()
 
 def load_audio(path):
@@ -82,7 +82,7 @@ def extract_acoustic_features(waveform):
     return np.array([crest_factor, dynamic_range, rolloff, sub_bass_ratio], dtype=np.float32)
 
 def load_mert(model_name, device):
-    print(f"Loading {model_name} ...")
+    print(f'Loading {model_name} ...')
 
     processor = Wav2Vec2FeatureExtractor.from_pretrained(model_name, trust_remote_code=True)
     model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
@@ -108,10 +108,10 @@ def extract_mert_feature(
     if augment:
         waveform = random_crop(waveform, sample_id)
 
-    inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors="pt")
-    input_values = inputs["input_values"].to(device)
+    inputs = processor(waveform.numpy(), sampling_rate=MERT_SAMPLE_RATE, return_tensors='pt')
+    input_values = inputs['input_values'].to(device)
 
-    if layer == "last":
+    if layer == 'last':
         outputs = model(input_values)
         h = outputs.last_hidden_state[0]
     else:
@@ -120,19 +120,19 @@ def extract_mert_feature(
 
         if layer == 0:
             def hook(module, input):
-                captured["h"] = input[0]
+                captured['h'] = input[0]
             handle = model.encoder.layers[0].register_forward_pre_hook(hook)
         else:
             def hook(module, input, output):
-                captured["h"] = output[0] if isinstance(output, tuple) else output
+                captured['h'] = output[0] if isinstance(output, tuple) else output
             handle = model.encoder.layers[layer - 1].register_forward_hook(hook)
 
         model(input_values)
         handle.remove()
-        h = captured["h"][0]
+        h = captured['h'][0]
 
     mean = h.mean(dim=0)
-    if pooling == "mean":
+    if pooling == 'mean':
         mert_feature = mean.cpu().numpy().astype(np.float32)
     else:
         std = h.std(dim=0)
@@ -163,13 +163,13 @@ def extract_split(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting MERT"):
-        sample_id = row["sample_id"]
-        cache_file = cache_dir / f"{sample_id}.npy"
+    for _, row in tqdm(df.iterrows(), total=len(df), desc='Extracting MERT'):
+        sample_id = row['sample_id']
+        cache_file = cache_dir / f'{sample_id}.npy'
         if cache_file.exists():
             feature = np.load(cache_file)
         else:
-            audio_path = dataset_dir / row["audio_path"]
+            audio_path = dataset_dir / row['audio_path']
 
             feature = extract_mert_feature(
                 audio_path,
@@ -186,8 +186,8 @@ def extract_split(
         features.append(feature)
         sample_ids.append(sample_id)
 
-        if pd.notna(row["label"]) and row["label"] != "":
-            labels.append(str(row["label"]))
+        if pd.notna(row['label']) and row['label'] != '':
+            labels.append(str(row['label']))
 
     X = np.stack(features)
     if len(labels) == len(df):
@@ -213,13 +213,13 @@ def extract_augmented_split(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting augmented MERT"):
-        sample_id = row["sample_id"]
-        cache_file = cache_dir / f"{sample_id}.npy"
+    for _, row in tqdm(df.iterrows(), total=len(df), desc='Extracting augmented MERT'):
+        sample_id = row['sample_id']
+        cache_file = cache_dir / f'{sample_id}.npy'
         if cache_file.exists():
             feature = np.load(cache_file)
         else:
-            audio_path = dataset_dir / row["audio_path"]
+            audio_path = dataset_dir / row['audio_path']
 
             feature = extract_mert_feature(
                 audio_path,
@@ -236,7 +236,7 @@ def extract_augmented_split(
             np.save(cache_file, feature)
 
         features.append(feature)
-        labels.append(str(row["label"]))
+        labels.append(str(row['label']))
 
     X = np.stack(features)
     y = np.array(labels)
@@ -269,50 +269,50 @@ def evaluate(classifier, X, y):
 def main():
     args = parse_args()
 
-    if args.layer != "last" and not 0 <= int(args.layer) <= 24:
-        raise ValueError("Layer must be last or between 0 and 24")
+    if args.layer != 'last' and not 0 <= int(args.layer) <= 24:
+        raise ValueError('Layer must be last or between 0 and 24')
 
-    if args.vocal and args.dataset != "B":
-        raise ValueError("--vocal can only be used with dataset B")
+    if args.vocal and args.dataset != 'B':
+        raise ValueError('--vocal can only be used with dataset B')
 
     mert_model = MERT_MODEL
 
-    dataset_dir = Path(f"data/dataset_{args.dataset}")
+    dataset_dir = Path(f'data/dataset_{args.dataset}')
     if args.vocal:
-        vocal_dir = Path("data/dataset_C")
-    feature_dir = Path(f"outputs/{args.dataset}/{args.pooling}_{args.layer}" + ("_aug" if args.augment else "") + ("_acoustic" if args.acoustic else "") + ("_vocal" if args.vocal else ""))
+        vocal_dir = Path('data/dataset_C')
+    feature_dir = Path(f'outputs/{args.dataset}/{args.pooling}_{args.layer}' + ('_aug' if args.augment else '') + ('_acoustic' if args.acoustic else '') + ('_vocal' if args.vocal else ''))
 
     output_dir = feature_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = feature_dir / "features"
-    augment_cache_dir = feature_dir / f"features_aug"
+    cache_dir = feature_dir / 'features'
+    augment_cache_dir = feature_dir / f'features_aug'
 
-    print(f"Dataset: {args.dataset}")
-    print(f"Pooling: {args.pooling}")
-    print(f"Layer: {args.layer}")
-    print(f"Augmentation: {args.augment}")
+    print(f'Dataset: {args.dataset}')
+    print(f'Pooling: {args.pooling}')
+    print(f'Layer: {args.layer}')
+    print(f'Augmentation: {args.augment}')
 
-    df = pd.read_csv(dataset_dir / "manifest.csv")
-    train_df = df[df["split"] == "train"].reset_index(drop=True)
-    val_df = df[df["split"] == "validation"].reset_index(drop=True)
+    df = pd.read_csv(dataset_dir / 'manifest.csv')
+    train_df = df[df['split'] == 'train'].reset_index(drop=True)
+    val_df = df[df['split'] == 'validation'].reset_index(drop=True)
 
-    print("\nSamples")
-    print("Train:", len(train_df))
-    print("Validation:", len(val_df))
+    print('\nSamples')
+    print('Train:', len(train_df))
+    print('Validation:', len(val_df))
 
     if torch.cuda.is_available():
-        device = torch.device("cuda")
+        device = torch.device('cuda')
     elif torch.backends.mps.is_available():
-        device = torch.device("mps")
+        device = torch.device('mps')
     else:
-        device = torch.device("cpu")
+        device = torch.device('cpu')
 
-    print("\nDevice:", device)
+    print('\nDevice:', device)
 
     processor, mert = load_mert(mert_model, device)
 
-    print("\nExtracting TRAIN features")
+    print('\nExtracting TRAIN features')
     X_train, y_train, _ = extract_split(
         train_df,
         dataset_dir,
@@ -326,7 +326,7 @@ def main():
     )
 
     if args.vocal:
-        vocal_cache_dir = feature_dir / "features_vocal"
+        vocal_cache_dir = feature_dir / 'features_vocal'
         X_train_vocal, _, _ = extract_split(
             train_df,
             vocal_dir,
@@ -341,7 +341,7 @@ def main():
         X_train = np.concatenate([X_train, X_train_vocal], axis=1)
 
     if args.augment:
-        print("\nExtracting AUGMENTED TRAIN features")
+        print('\nExtracting AUGMENTED TRAIN features')
         X_aug, y_aug = extract_augmented_split(
             train_df,
             dataset_dir,
@@ -355,7 +355,7 @@ def main():
         )
 
         if args.vocal:
-            vocal_augment_cache_dir = feature_dir / "features_aug_vocal"
+            vocal_augment_cache_dir = feature_dir / 'features_aug_vocal'
             X_aug_vocal, _ = extract_augmented_split(
                 train_df,
                 vocal_dir,
@@ -372,7 +372,7 @@ def main():
         X_train = np.concatenate([X_train, X_aug], axis=0)
         y_train = np.concatenate([y_train, y_aug], axis=0)
 
-    print("\nExtracting VALIDATION features")
+    print('\nExtracting VALIDATION features')
     X_val, y_val, _ = extract_split(
         val_df,
         dataset_dir,
@@ -399,12 +399,12 @@ def main():
         )
         X_val = np.concatenate([X_val, X_val_vocal], axis=1)
 
-    print("\nFeature shape:", X_train.shape)
+    print('\nFeature shape:', X_train.shape)
 
     del mert
-    if device.type == "cuda":
+    if device.type == 'cuda':
         torch.cuda.empty_cache()
-    elif device.type == "mps":
+    elif device.type == 'mps':
         torch.mps.empty_cache()
 
     best_classifier = None
@@ -413,16 +413,16 @@ def main():
 
     C = [0.005, 0.0065, 0.008, 0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.5, 1.0]
     for c in C:
-        if args.dataset == "A":
+        if args.dataset == 'A':
             steps = [
-                ("scaler", StandardScaler()),
-                ("norm", Normalizer(norm="l2")),
-                ("svm", LinearSVC(C=c, penalty="l2", dual="auto", class_weight="balanced", max_iter=10000, random_state=RANDOM_SEED))
+                ('scaler', StandardScaler()),
+                ('norm', Normalizer(norm='l2')),
+                ('svm', LinearSVC(C=c, penalty='l2', dual='auto', class_weight='balanced', max_iter=10000, random_state=RANDOM_SEED))
             ]
         else:
             steps = [
-                ("scaler", StandardScaler()),
-                ("svm", SVC(kernel="linear", C=c))
+                ('scaler', StandardScaler()),
+                ('svm', SVC(kernel='linear', C=c))
             ]
 
         classifier = Pipeline(steps)
@@ -432,11 +432,11 @@ def main():
         val_top1, val_top3, _, _ = evaluate(classifier, X_val, y_val)
 
         print(
-            f"Param={c:<6} "
-            f"Train Top-1={train_top1:.4f} "
-            f"Train Top-3={train_top3:.4f} "
-            f"Val Top-1={val_top1:.4f} "
-            f"Val Top-3={val_top3:.4f}"
+            f'Param={c:<6} '
+            f'Train Top-1={train_top1:.4f} '
+            f'Train Top-3={train_top3:.4f} '
+            f'Val Top-1={val_top1:.4f} '
+            f'Val Top-3={val_top3:.4f}'
         )
 
         val_score = val_top1 + 0.5 * val_top3
@@ -447,62 +447,62 @@ def main():
 
     classifier = best_classifier
 
-    print("\nBest C:", best_c)
+    print('\nBest C:', best_c)
 
     train_top1, train_top3, _, _ = evaluate(classifier, X_train, y_train)
     val_top1, val_top3, y_pred, _ = evaluate(classifier, X_val, y_val)
     generalization_gap = train_top1 - val_top1
 
-    print("\n==============================")
-    print("Results")
-    print("==============================")
-    print(f"Train Top-1 Accuracy: {train_top1:.4f}")
-    print(f"Train Top-3 Accuracy: {train_top3:.4f}")
-    print(f"Validation Top-1 Accuracy: {val_top1:.4f}")
-    print(f"Validation Top-3 Accuracy: {val_top3:.4f}")
-    print(f"Generalization Gap: {generalization_gap:.4f}")
+    print('\n==============================')
+    print('Results')
+    print('==============================')
+    print(f'Train Top-1 Accuracy: {train_top1:.4f}')
+    print(f'Train Top-3 Accuracy: {train_top3:.4f}')
+    print(f'Validation Top-1 Accuracy: {val_top1:.4f}')
+    print(f'Validation Top-3 Accuracy: {val_top3:.4f}')
+    print(f'Generalization Gap: {generalization_gap:.4f}')
 
     classes = classifier.classes_
     cm = confusion_matrix(y_val, y_pred, labels=classes)
-    print("\nConfusion Matrix")
+    print('\nConfusion Matrix')
     print(classes)
     print(cm)
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=classes)
     disp.plot(xticks_rotation=45)
     plt.tight_layout()
-    cm_path = output_dir / "confusion_matrix.png"
+    cm_path = output_dir / 'confusion_matrix.png'
     plt.savefig(cm_path, dpi=200)
     plt.close()
 
-    model_path = output_dir / "classifier.joblib"
+    model_path = output_dir / 'classifier.joblib'
     joblib.dump(classifier, model_path)
 
     metrics = {
-        "dataset": args.dataset,
-        "pooling": args.pooling,
-        "layer": args.layer,
-        "augmentation": args.augment,
-        "acoustic": args.acoustic,
-        "c": best_c,
-        "train_top1": float(train_top1),
-        "train_top3": float(train_top3),
-        "val_top1": float(val_top1),
-        "val_top3": float(val_top3),
-        "generalization_gap": float(generalization_gap),
-        "classes": classes.tolist(),
+        'dataset': args.dataset,
+        'pooling': args.pooling,
+        'layer': args.layer,
+        'augmentation': args.augment,
+        'acoustic': args.acoustic,
+        'c': best_c,
+        'train_top1': float(train_top1),
+        'train_top3': float(train_top3),
+        'val_top1': float(val_top1),
+        'val_top3': float(val_top3),
+        'generalization_gap': float(generalization_gap),
+        'classes': classes.tolist(),
     }
 
     if args.augment:
-        metrics["crop_seconds"] = CROP_SECONDS
-    metrics_path = output_dir / "metrics.json"
-    with open(metrics_path, "w") as f:
+        metrics['crop_seconds'] = CROP_SECONDS
+    metrics_path = output_dir / 'metrics.json'
+    with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
 
-    print("\nSaved:")
+    print('\nSaved:')
     print(model_path)
     print(cm_path)
     print(metrics_path)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

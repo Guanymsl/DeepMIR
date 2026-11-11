@@ -7,14 +7,14 @@ import shutil
 
 from pathlib import Path
 
-CAPTIONS_PATH = Path("av.csv")
-GT_DIR = Path("audio_wav")
-GT_PATH = Path("outputs/retrieval.json")
+CAPTIONS_PATH = Path('av.csv')
+GT_DIR = Path('audio_wav')
+GT_PATH = Path('outputs/retrieval.json')
 
-PRED_DIR = Path("outputs/generated")
-OUTPUT_DIR = Path("outputs/evaluation")
+PRED_DIR = Path('outputs/generated')
+OUTPUT_DIR = Path('outputs/evaluation')
 
-METRICS = ("fd-vgg", "kl-passt", "clap", "mqascore")
+METRICS = ('fd-vgg', 'kl-passt', 'clap', 'mqascore')
 
 BATCH_SIZE = 8
 SECONDS = 10
@@ -37,7 +37,7 @@ def run(cmd):
 def main():
     args = parse_args()
 
-    script = Path("av-benchmark/evaluate.py")
+    script = Path('av-benchmark/evaluate.py')
 
     pred = PRED_DIR / args.pred
     output = OUTPUT_DIR / args.pred
@@ -90,7 +90,7 @@ def main():
         print(f"CLAP: {result['CLAP']:.6f}")
 
     if 'kl-passt' in metrics:
-        retrieval_path = Path("outputs/retrieval.json")
+        retrieval_path = Path('outputs/retrieval.json')
         reference_dir = output / 'retrieved_reference'
         reference_dir.mkdir(parents=True, exist_ok=True)
 
@@ -98,8 +98,8 @@ def main():
             retrieval = json.load(f)
 
         for sid, musiccaps_id in retrieval.items():
-            source = GT_DIR / f"{musiccaps_id}.wav"
-            destination = reference_dir / f"{sid}.wav"
+            source = GT_DIR / f'{musiccaps_id}.wav'
+            destination = reference_dir / f'{sid}.wav'
             shutil.copyfile(source, destination)
 
         gt_cache = output / 'paired_gt_cache'
@@ -190,7 +190,7 @@ def main():
     path.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
 
     print(json.dumps(result, indent=2))
-    print("Saved:", path)
+    print('Saved:', path)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

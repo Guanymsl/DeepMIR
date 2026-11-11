@@ -177,8 +177,8 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
         return (1. + math.erf(x / math.sqrt(2.))) / 2.
 
     if (mean < a - 2 * std) or (mean > b + 2 * std):
-        warnings.warn("mean is more than 2 std from [a, b] in nn.init.trunc_normal_. "
-                      "The distribution of values may be incorrect.",
+        warnings.warn('mean is more than 2 std from [a, b] in nn.init.trunc_normal_. '
+                      'The distribution of values may be incorrect.',
                       stacklevel=2)
 
     with torch.no_grad():
@@ -237,16 +237,16 @@ def variance_scaling_(tensor, scale=1.0, mode='fan_in', distribution='normal'):
 
     variance = scale / denom
 
-    if distribution == "truncated_normal":
+    if distribution == 'truncated_normal':
         # constant is stddev of standard normal truncated to (-2, 2)
         trunc_normal_(tensor, std=math.sqrt(variance) / .87962566103423978)
-    elif distribution == "normal":
+    elif distribution == 'normal':
         tensor.normal_(std=math.sqrt(variance))
-    elif distribution == "uniform":
+    elif distribution == 'uniform':
         bound = math.sqrt(3 * variance)
         tensor.uniform_(-bound, bound)
     else:
-        raise ValueError(f"invalid distribution {distribution}")
+        raise ValueError(f'invalid distribution {distribution}')
 
 
 def lecun_normal_(tensor):
@@ -319,7 +319,7 @@ class WindowAttention(nn.Module):
         relative_coords[:, :, 1] += self.window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
         relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        self.register_buffer("relative_position_index", relative_position_index)
+        self.register_buffer('relative_position_index', relative_position_index)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -400,7 +400,7 @@ class SwinTransformerBlock(nn.Module):
             # if window size is larger than input resolution, we don't partition windows
             self.shift_size = 0
             self.window_size = min(self.input_resolution)
-        assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
+        assert 0 <= self.shift_size < self.window_size, 'shift_size must in 0-window_size'
 
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(
@@ -440,7 +440,7 @@ class SwinTransformerBlock(nn.Module):
         else:
             attn_mask = None
 
-        self.register_buffer("attn_mask", attn_mask)
+        self.register_buffer('attn_mask', attn_mask)
 
     def forward(self, x):
         # pdb.set_trace()
@@ -486,8 +486,8 @@ class SwinTransformerBlock(nn.Module):
         return x, attn
 
     def extra_repr(self):
-        return f"dim={self.dim}, input_resolution={self.input_resolution}, num_heads={self.num_heads}, " \
-               f"window_size={self.window_size}, shift_size={self.shift_size}, mlp_ratio={self.mlp_ratio}"
+        return f'dim={self.dim}, input_resolution={self.input_resolution}, num_heads={self.num_heads}, ' \
+               f'window_size={self.window_size}, shift_size={self.shift_size}, mlp_ratio={self.mlp_ratio}'
 
 
 
@@ -512,8 +512,8 @@ class PatchMerging(nn.Module):
         """
         H, W = self.input_resolution
         B, L, C = x.shape
-        assert L == H * W, "input feature has wrong size"
-        assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
+        assert L == H * W, 'input feature has wrong size'
+        assert H % 2 == 0 and W % 2 == 0, f'x size ({H}*{W}) are not even.'
 
         x = x.view(B, H, W, C)
 
@@ -530,7 +530,7 @@ class PatchMerging(nn.Module):
         return x
 
     def extra_repr(self):
-        return f"input_resolution={self.input_resolution}, dim={self.dim}"
+        return f'input_resolution={self.input_resolution}, dim={self.dim}'
 
 
 class BasicLayer(nn.Module):
@@ -598,7 +598,7 @@ class BasicLayer(nn.Module):
         return x, attn
 
     def extra_repr(self):
-        return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
+        return f'dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}'
 
 
 # The Core of HTSAT
@@ -843,12 +843,12 @@ class HTSAT_Swin_Transformer(nn.Module):
         B, C, T, F = x.shape
         target_T = int(self.spec_size * self.freq_ratio)
         target_F = self.spec_size // self.freq_ratio
-        assert T <= target_T and F <= target_F, "the wav size should less than or equal to the swin input size"
+        assert T <= target_T and F <= target_F, 'the wav size should less than or equal to the swin input size'
         # to avoid bicubic zero error
         if T < target_T:
-            x = nn.functional.interpolate(x, (target_T, x.shape[3]), mode="bicubic", align_corners=True)
+            x = nn.functional.interpolate(x, (target_T, x.shape[3]), mode='bicubic', align_corners=True)
         if F < target_F:
-            x = nn.functional.interpolate(x, (x.shape[2], target_F), mode="bicubic", align_corners=True)
+            x = nn.functional.interpolate(x, (x.shape[2], target_F), mode='bicubic', align_corners=True)
         x = x.permute(0,1,3,2).contiguous()
         x = x.reshape(x.shape[0], x.shape[1], x.shape[2], self.freq_ratio, x.shape[3] // self.freq_ratio)
         # print(x.shape)
@@ -861,12 +861,12 @@ class HTSAT_Swin_Transformer(nn.Module):
         B, C, T, F = x.shape
         target_T = int(self.spec_size * self.freq_ratio)
         target_F = self.spec_size // self.freq_ratio
-        assert T <= target_T and F <= target_F, "the wav size should less than or equal to the swin input size"
+        assert T <= target_T and F <= target_F, 'the wav size should less than or equal to the swin input size'
         # to avoid bicubic zero error
         if T < target_T:
-            x = nn.functional.interpolate(x, (target_T, x.shape[3]), mode="bicubic", align_corners=True)
+            x = nn.functional.interpolate(x, (target_T, x.shape[3]), mode='bicubic', align_corners=True)
         if F < target_F:
-            x = nn.functional.interpolate(x, (x.shape[2], target_F), mode="bicubic", align_corners=True)  
+            x = nn.functional.interpolate(x, (x.shape[2], target_F), mode='bicubic', align_corners=True)
         x = x.permute(0,1,3,2).contiguous() # B C F T
         x = x[:,:,:,cur_pos:cur_pos + self.spec_size]
         x = x.repeat(repeats = (1,1,4,1))
@@ -874,12 +874,12 @@ class HTSAT_Swin_Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor, mixup_lambda = None, infer_mode = False, device=None):# out_feat_keys: List[str] = None):
 
-        if self.enable_fusion and x["longer"].sum() == 0:
+        if self.enable_fusion and x['longer'].sum() == 0:
             # if no audio is longer than 10s, then randomly select one audio to be longer
             if self.training:
-                x["longer"][torch.randint(0, x["longer"].shape[0], (1,))] = True
+                x['longer'][torch.randint(0, x['longer'].shape[0], (1,))] = True
             else:
-                x = x["mel_fusion"].to(device=device, non_blocking=True)
+                x = x['mel_fusion'].to(device=device, non_blocking=True)
                 x = x.transpose(1, 3)
                 x = self.bn0(x)
                 x = x.transpose(1, 3)
@@ -888,7 +888,7 @@ class HTSAT_Swin_Transformer(nn.Module):
                 return output_dict
                 
         if not self.enable_fusion:
-            x = x["waveform"].to(device=device, non_blocking=True)
+            x = x['waveform'].to(device=device, non_blocking=True)
             x = self.spectrogram_extractor(x)   # (batch_size, 1, time_steps, freq_bins)
             x = self.logmel_extractor(x)    # (batch_size, 1, time_steps, mel_bins)
             x = x.transpose(1, 3)
@@ -903,8 +903,8 @@ class HTSAT_Swin_Transformer(nn.Module):
             x = self.reshape_wav2img(x)
             output_dict = self.forward_features(x)
         else:
-            longer_list = x["longer"].to(device=device, non_blocking=True)
-            x = x["mel_fusion"].to(device=device, non_blocking=True)
+            longer_list = x['longer'].to(device=device, non_blocking=True)
+            x = x['mel_fusion'].to(device=device, non_blocking=True)
             x = x.transpose(1, 3)
             x = self.bn0(x)
             x = x.transpose(1, 3)
@@ -990,8 +990,8 @@ class HTSAT_Swin_Transformer(nn.Module):
 def create_htsat_model(audio_cfg, enable_fusion=False, fusion_type='None'):
     try:
 
-        assert audio_cfg.model_name in ["tiny", "base", "large"], "model name for HTS-AT is wrong!"
-        if audio_cfg.model_name == "tiny":
+        assert audio_cfg.model_name in ['tiny', 'base', 'large'], 'model name for HTS-AT is wrong!'
+        if audio_cfg.model_name == 'tiny':
             model = HTSAT_Swin_Transformer(
                 spec_size=256,
                 patch_size=4,
@@ -1005,7 +1005,7 @@ def create_htsat_model(audio_cfg, enable_fusion=False, fusion_type='None'):
                 enable_fusion = enable_fusion,
                 fusion_type = fusion_type
             )
-        elif audio_cfg.model_name == "base":
+        elif audio_cfg.model_name == 'base':
             model = HTSAT_Swin_Transformer(
                 spec_size=256,
                 patch_size=4,
@@ -1019,7 +1019,7 @@ def create_htsat_model(audio_cfg, enable_fusion=False, fusion_type='None'):
                 enable_fusion = enable_fusion,
                 fusion_type = fusion_type
             )
-        elif audio_cfg.model_name == "large":
+        elif audio_cfg.model_name == 'large':
             model = HTSAT_Swin_Transformer(
                 spec_size=256,
                 patch_size=4,
