@@ -1,19 +1,7 @@
 #!/usr/bin/env python
-"""Score (audio, text) items with MQAScore.
+"""Score audio/tag JSONL items with the AF2 per-tag MQAScore protocol.
 
-Input JSONL, one item per line:
-  pertag : {"id": "...", "audio": "path.wav", "tags": {"genre": ["jazz"], "instrument": [...], ...}}
-  caption: {"id": "...", "audio": "path.wav", "text": "A calm jazz piano piece ..."}
-Tags may be plain strings or {"entity": ...} dicts (output of extract_tags.py).
-
-Output JSONL, one line per item (input fields are kept, scores added), plus
-<output>.meta.json with the full setting. Re-running with the same --output
-resumes; changing any setting with the same --output aborts.
-
-Example:
-  CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 \
-    python scripts/score.py --model qwen3omni \
-      --input examples/items_pertag.jsonl --output out/qwen3omni_pertag.jsonl
+Input fields: id, audio, tags. Existing output IDs are resumed.
 """
 import argparse
 import sys
@@ -30,15 +18,14 @@ def parse_args():
     p.add_argument("--model", required=True, choices=list(MODELS))
     p.add_argument("--input", required=True)
     p.add_argument("--output", required=True)
-    p.add_argument("--protocol", choices=["pertag", "caption"], default="pertag")
+    p.add_argument("--protocol", choices=["pertag"], default="pertag")
     p.add_argument("--attributes", default=",".join(DEFAULT_ATTRIBUTES),
                    help=f"comma list, or 'all' for {ALL_ATTRIBUTES}")
     p.add_argument("--fix-seconds", default="default",
                    help="pad/truncate audio to N seconds; 'full' = no change; "
-                        "'default' = backend default (qwen3omni 10, af/mf 30)")
+                        "'default' = AF2 default (10 seconds)")
     p.add_argument("--cache-dir", default=".mqascore_audio_cache")
     p.add_argument("--model-id", default=None, help="override the HF model id / local path")
-    p.add_argument("--attn-impl", default="auto", help="qwen3omni only: auto|flash_attention_2|sdpa")
     p.add_argument("--limit", type=int, default=None, help="score only the first N items (dry run)")
     return p.parse_args()
 
@@ -52,7 +39,7 @@ def main():
         raise SystemExit(f"unknown attributes {bad}; choose from {ALL_ATTRIBUTES}")
 
     items = read_jsonl(args.input)[: args.limit]
-    key = "tags" if args.protocol == "pertag" else "text"
+    key = "tags"
     missing = [it.get("id") for it in items if "id" not in it or "audio" not in it or key not in it]
     if missing:
         raise SystemExit(f"{len(missing)} items lack id/audio/{key}, e.g. {missing[:3]}")
@@ -66,8 +53,6 @@ def main():
         return
 
     kw = {"model_id": args.model_id} if args.model_id else {}
-    if args.model == "qwen3omni":
-        kw["attn_impl"] = args.attn_impl
     backend = load_backend(args.model, **kw)
     fs = {"default": {}, "full": {"fix_seconds": None}}.get(
         args.fix_seconds, {"fix_seconds": float(args.fix_seconds)})
@@ -78,10 +63,7 @@ def main():
     failed = []
     for it in tqdm(todo):
         try:
-            if args.protocol == "pertag":
-                res = scorer.score_tags(it["audio"], it["tags"])
-            else:
-                res = scorer.score_caption(it["audio"], it["text"])
+            res = scorer.score_tags(it["audio"], it["tags"])
         except (FileNotFoundError, RuntimeError) as e:
             print(f"[skip] {it['id']}: {type(e).__name__}: {e}", flush=True)
             failed.append(it["id"])

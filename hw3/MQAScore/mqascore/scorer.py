@@ -6,7 +6,7 @@ item score is the unweighted mean over all tags. A caption protocol (one
 question about the whole text) is also provided for comparison.
 """
 from .audio import prepare_audio
-from .prompts import DEFAULT_ATTRIBUTES, caption_question, pertag_question, text_protocol
+from .prompts import DEFAULT_ATTRIBUTES, pertag_question, text_protocol
 from .tags import normalize_tags
 
 _UNSET = object()
@@ -47,11 +47,6 @@ class MQAScorer:
                                for a, v in per_attribute.items()},
             "per_attribute": per_attribute,
         }
-
-    def score_caption(self, audio_path, text):
-        q = caption_question(text)
-        p, ly, ln = self.backend.score(self._audio(audio_path), [q])[0]
-        return {"question": q, "caption_score": p, "loglik_yes": ly, "loglik_no": ln}
 
     def protocol(self, granularity):
         p = self.backend.protocol()

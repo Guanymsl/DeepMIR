@@ -55,11 +55,6 @@ def pertag_question(attribute, tag):
     return question_template(attribute).format(tag=tag)
 
 
-def caption_question(caption):
-    """The caption is stripped, never truncated."""
-    return load_instruction("lalm_caption").format(caption=caption.strip())
-
-
 def tag_extraction_instruction():
     return load_instruction("llm_tag_extraction", strip_newline=False)
 
@@ -70,8 +65,6 @@ def text_protocol(granularity, attributes=None):
     if granularity == "pertag":
         p["attributes"] = list(attributes)
         p["question_templates"] = {a: question_template(a) for a in attributes}
-    else:
-        p["caption_question_template"] = load_instruction("lalm_caption")
     return p
 
 
@@ -80,5 +73,4 @@ if __name__ == "__main__":
     print(f"system : {system_prompt()}")
     for a in ALL_ATTRIBUTES:
         print(f"{a:<26}: {pertag_question(a, 'jazz')}")
-    print(f"caption: {caption_question('A lively summer piano solo piece.')}")
     print(f"tag-extraction instruction: {len(tag_extraction_instruction())} chars")

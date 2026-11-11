@@ -2,20 +2,13 @@
 #   Licensed under the MIT license.
 
 import os
-import yaml
-import json
-import argparse
 
 import torch
 import librosa
 import numpy as np
 import soundfile as sf
 from pydub import AudioSegment
-from safetensors.torch import load_file
-from huggingface_hub import snapshot_download
 
-from src.factory import create_model_and_transforms
-from utils import Dict2Class, get_autocast, get_cast_dtype
 
 def int16_to_float32(x):
     return (x / 32767.0).astype(np.float32)
@@ -132,109 +125,3 @@ def load_audio(audio_path, clap_config):
     audio_clips = torch.cat(audio_clips)
     
     return audio_clips, audio_embed_mask
-
-def predict(filepath, question, clap_config, inference_kwargs):
-
-    audio_clips, audio_embed_mask = load_audio(filepath, clap_config)
-    audio_clips = audio_clips.to(device_id, dtype=cast_dtype, non_blocking=True)
-    audio_embed_mask = audio_embed_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
-
-    text_prompt = str(question).lower()
-
-    sample = f"<audio>{text_prompt.strip()}{tokenizer.sep_token}"
-
-    text = tokenizer(
-        sample,
-        max_length=512,
-        padding="longest",
-        truncation="only_first",
-        return_tensors="pt"
-    )
-
-    input_ids = text["input_ids"].to(device_id, non_blocking=True)
-
-    prompt = input_ids
-
-    with torch.no_grad():
-        output = model.generate(
-            audio_x=audio_clips.unsqueeze(0),
-            audio_x_mask=audio_embed_mask.unsqueeze(0),
-            lang_x=prompt,
-            eos_token_id=tokenizer.eos_token_id,
-            max_new_tokens=256,
-            **inference_kwargs,
-            # temperature=0.0
-        )[0]
-    
-    output_decoded = tokenizer.decode(output).split(tokenizer.sep_token)[-1].replace(tokenizer.eos_token, '').replace(tokenizer.pad_token, '').replace('<|endofchunk|>', '')
-
-    print('Prompt: ', question)
-    print('Audio Flamingo 2: ', output_decoded)
-
-    return output_decoded
-
-
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", "-i", type=str, help="Path to input JSON file")
-    parsed_args = parser.parse_args()
-
-    snapshot_download(repo_id="nvidia/audio-flamingo-2", local_dir="./", token="YOUR_HF_TOKEN")
-
-    config = yaml.load(open("configs/inference.yaml"), Loader=yaml.FullLoader)
-
-    data_config = config['data_config']
-    model_config = config['model_config']
-    clap_config = config['clap_config']
-    args = Dict2Class(config['train_config'])
-
-    model, tokenizer = create_model_and_transforms(
-        **model_config,
-        clap_config=clap_config, 
-        use_local_files=args.offline,
-        gradient_checkpointing=args.gradient_checkpointing,
-        freeze_lm_embeddings=args.freeze_lm_embeddings,
-    )
-
-    device_id = 0
-    model = model.to(device_id)
-    model.eval()
-
-    # Load metadata
-    with open("safe_ckpt/metadata.json", "r") as f:
-        metadata = json.load(f)
-
-    # Reconstruct the full state_dict
-    state_dict = {}
-
-    # Load each SafeTensors chunk
-    for chunk_name in metadata:
-        chunk_path = f"safe_ckpt/{chunk_name}.safetensors"
-        chunk_tensors = load_file(chunk_path)
-
-        # Merge tensors into state_dict
-        state_dict.update(chunk_tensors)
-
-    missing_keys, unexpected_keys = model.load_state_dict(state_dict, False)
-
-    autocast = get_autocast(
-        args.precision, cache_enabled=(not args.fsdp)
-    )
-
-    cast_dtype = get_cast_dtype(args.precision)
-
-    data = []
-    with open(parsed_args.input, "r", encoding="utf-8") as file:
-        for line in file:
-            data.append(json.loads(line.strip()))
-
-    inference_kwargs = {
-        "do_sample": True,
-        "top_k": 30,
-        "top_p": 0.95,
-        "num_return_sequences": 1
-    }
-
-    for item in data:
-        predict(item['path'], item['prompt'], clap_config, inference_kwargs)

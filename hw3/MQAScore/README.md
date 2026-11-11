@@ -28,17 +28,11 @@ context, ...) and probes each one separately against the audio.
 4. **Item score.** MQAScore = the unweighted mean of P(Yes) over all tags of the
    item. Per-attribute means and every per-tag score are also saved.
 
-A **caption protocol** (`--protocol caption`) asks a single question about the whole
-text instead (`Does this music match the following description? '<text>' Answer Yes or No.`),
-for comparison with per-tag scoring.
-
 ## Supported models
 
 | `--model` | Checkpoint | Env (`envs/`) | GPU memory (bf16) | Default audio length |
 |---|---|---|---|---|
-| `qwen3omni` | [`Qwen/Qwen3-Omni-30B-A3B-Instruct`](https://huggingface.co/Qwen/Qwen3-Omni-30B-A3B-Instruct) (thinker only) | `qwen3_omni` | ~60–70 GB (sharded across visible GPUs) | 10 s |
-| `af` | [`nvidia/audio-flamingo-next-hf`](https://huggingface.co/nvidia/audio-flamingo-next-hf) | `music_flamingo` | fits one 24 GB GPU | 30 s |
-| `mf` | [`nvidia/music-flamingo-hf`](https://huggingface.co/nvidia/music-flamingo-hf) | `music_flamingo` | fits one 24 GB GPU | 30 s |
+| `af2` | [`nvidia/audio-flamingo-2-0.5B`](https://huggingface.co/nvidia/audio-flamingo-2-0.5B) | `mqascore_af2` | depends on device | 10 s |
 
 **Audio length.** By default, audio is loaded mono with librosa, then zero-padded
 or truncated to the model's default length before it reaches the processor.
@@ -47,51 +41,38 @@ change the length, or `--fix-seconds full` to pass the original file unchanged.
 
 ## Installation
 
-```bash
-conda env create -f envs/qwen3_omni.yml        # Qwen3-Omni + tag extraction
-conda env create -f envs/music_flamingo.yml    # Audio Flamingo Next / Music Flamingo
-```
-
-See [`envs/README.md`](envs/README.md) for why two environments are needed and
-for the pinned versions. Run the scripts from the repository root, or install
-the package into an env with `pip install -e .`.
+Run the scripts from the repository root using the HW3 environments:
+`mqascore_tags` for text tag extraction and `mqascore_af2` for AF2 scoring.
+The scripts use local imports; no editable package installation is required.
+AF2 sources are loaded from `../AudioFlamingo2/inference_HF_pretrained/`.
 
 ## Quickstart
 
+From `hw3/`, use the wrapper:
+
 ```bash
-# 0. Pick a free GPU (on multi-GPU machines use PCI_BUS_ID so ids match nvidia-smi)
-export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0
-
-# 1. (Optional) text -> tags with an LLM, if you only have captions
-conda activate qwen3_omni
-python scripts/extract_tags.py --input examples/captions.jsonl --output out/tags.jsonl
-
-# 2. Score with an LALM (per-tag MQAScore)
-python scripts/score.py --model qwen3omni --input out/tags.jsonl --output out/qwen3omni.jsonl
-
-conda activate music_flamingo
-python scripts/score.py --model mf --input out/tags.jsonl --output out/mf.jsonl
-
-# Caption protocol, for comparison
-python scripts/score.py --model af --protocol caption \
-    --input examples/items_caption.jsonl --output out/af_caption.jsonl
+conda run --no-capture-output -n deepmir_hw3 python evaluate.py --pred baseline --metrics mqascore
 ```
 
-The example files reference `examples/audio/demo_{1,2,3}.wav`. No audio is
-shipped, so add your own files there or edit the `audio` paths. Use
-`--limit 10` to dry-run on a few items first.
+Or run these commands from the MQAScore repository root with your input JSONL:
+
+```bash
+conda run --no-capture-output -n mqascore_tags python scripts/extract_tags.py --model Qwen/Qwen3-1.7B --input captions.jsonl --output tags.jsonl
+conda run --no-capture-output -n mqascore_af2 python scripts/score.py --model af2 --input tags.jsonl --output scores.jsonl --protocol pertag --fix-seconds 10
+```
+
+Use `--limit 10` to dry-run on a few items first.
 
 ### Python API
 
 ```python
 from mqascore import MQAScorer, load_backend
 
-scorer = MQAScorer(load_backend("qwen3omni"))   # or "af", "mf"
+scorer = MQAScorer(load_backend("af2"))
 res = scorer.score_tags("song.wav", {"genre": ["jazz"], "instrument": ["piano", "upright bass"]})
 print(res["mean_score"], res["attribute_mean"])
 ```
 
-See [`examples/python_api.py`](examples/python_api.py).
 
 ## Input and output formats
 
@@ -109,7 +90,6 @@ See [`examples/python_api.py`](examples/python_api.py).
   `genre,instrument,mood_theme,vocal,context`; `all` adds `rhythm_tempo`,
   `production_sound_quality` and `others`.
 
-**Caption input** (`--protocol caption`): `{"id", "audio", "text"}`.
 
 **Output.** One JSON object per line. Input fields are kept and these are added:
 
@@ -119,7 +99,6 @@ See [`examples/python_api.py`](examples/python_api.py).
 | `n_tags` | number of scored tags |
 | `attribute_mean` | `{attribute: mean P(Yes)}` |
 | `per_attribute` | `{attribute: [{tag, question, score, loglik_yes, loglik_no, extra}]}` |
-| `caption_score`, `question`, `loglik_yes`, `loglik_no` | caption protocol only |
 
 **Settings file.** Next to every output there is a `<output>.meta.json`. It records
 the model id and class, Yes/No token ids, attention implementation, audio length,
@@ -136,50 +115,26 @@ All prompts are plain text files in [`instructions/`](instructions/), named
 |---|---|
 | `instruction_lalm_system.txt` | system prompt for every yes/no question |
 | `instruction_lalm_pertag_<attribute>.txt` | question template per attribute (`{tag}` placeholder) |
-| `instruction_lalm_caption.txt` | caption-protocol question (`{caption}` placeholder) |
 | `instruction_llm_tag_extraction.txt` | instruction for the text LLM in `scripts/extract_tags.py` |
 
 The code only reads these files; nothing is hard-coded. **Editing them changes
-the scores.** The texts in this repo are the ones behind our results, and
-`tests/test_prompts.py` fails if they change. To try other prompts without
+the scores.** To try other prompts without
 editing the repo copy, set `MQASCORE_INSTRUCTION_DIR` to a directory with your
 own versions.
 
 ## Notes
 
-- **Batch size is always 1.** Qwen3-Omni is a mixture-of-experts model. In bf16,
-  packing several questions into one batch changes expert grouping and reduction
-  order. We measured max |ΔP(Yes)| = 4.1e-2 between batch=1 and packed batches,
-  versus exactly 0 between two batch=1 runs. All backends therefore score one
-  question per forward pass.
-- **Prompt order differs by model family, as each model expects.** Qwen puts the
-  audio before the question; AF/MF put the question before the audio.
-- **Tag extraction** used `Qwen/Qwen3-4B-Instruct-2507` with greedy decoding. Any
-  instruction-tuned LLM can be swapped in with `--model`.
+- **Batch size is always 1.** All questions are scored one per forward pass.
+- **Tag extraction** uses `Qwen/Qwen3-1.7B` in the HW3 wrapper. Any instruction-tuned LLM can be swapped in with `--model`.
+- Keep extracted tags fixed when comparing audio models.
 
 ## Repository layout
 
 ```
 instructions/   all LALM / LLM prompts (instruction_<usage>.txt)
 mqascore/       library: prompts, P(Yes) scoring, audio prep, backends, scorer, I/O
-  models/       qwen3_omni.py, audio_flamingo.py (af / mf), base.py
+  models/       af2.py, base.py
 scripts/        score.py (CLI), extract_tags.py (text -> tags)
-examples/       example inputs and a Python API example (bring your own audio)
-envs/           conda environment files and pinned requirements
-tests/          prompt guard test; compare_reference.py for checking reproduced scores
-```
-
-## Status
-
-This repository was extracted from our experiment code. **It has not yet been
-checked numerically against the scores reported in the paper.**
-`tests/compare_reference.py` is provided for that check, and the reference files
-for it will go in `tests/fixtures/`.
-
-## Citation
-
-```bibtex
-TBD
 ```
 
 ## License
