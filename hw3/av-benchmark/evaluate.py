@@ -16,14 +16,10 @@ LOGFORMAT = "[%(log_color)s%(levelname)-8s%(reset)s]: %(log_color)s%(message)s%(
 
 
 def setup_eval_logging(log_level: int = logging.INFO):
-    logging.root.setLevel(log_level)
-    formatter = ColoredFormatter(LOGFORMAT)
     stream = logging.StreamHandler()
-    stream.setLevel(log_level)
-    stream.setFormatter(formatter)
-    log = logging.getLogger()
-    log.setLevel(log_level)
-    log.addHandler(stream)
+    stream.setFormatter(ColoredFormatter(LOGFORMAT))
+    logging.basicConfig(level=log_level, handlers=[stream], force=True)
+    logging.getLogger('httpx').setLevel(logging.WARNING)
 
 
 setup_eval_logging()
@@ -31,6 +27,25 @@ setup_eval_logging()
 
 @torch.inference_mode()
 def main(args):
+    if args.clap_only:
+        if args.captions is None or args.pred_audio is None:
+            raise ValueError('--clap_only requires --captions and --pred_audio')
+        from av_bench.clap import evaluate_clap
+
+        output = args.pred_cache or args.pred_audio / 'cache'
+        output = output.expanduser()
+        output.mkdir(parents=True, exist_ok=True)
+        score, scores = evaluate_clap(
+            args.pred_audio.expanduser(), args.captions.expanduser(),
+            args.audio_length, args.pred_batch_size,
+        )
+        (output / 'output_metrics.json').write_text(
+            json.dumps({'LAION-CLAP-Score': score}, indent=2) + '\n', encoding='utf-8')
+        (output / 'clap.json').write_text(
+            json.dumps(scores, indent=2) + '\n', encoding='utf-8')
+        log.info('LAION-CLAP-Score: %.6f', score)
+        return
+
     gt_audio: Path = args.gt_audio
     gt_cache: Path = args.gt_cache
     pred_audio: Path = args.pred_audio
@@ -51,9 +66,6 @@ def main(args):
             raise ValueError('Must specify either gt_audio or gt_cache')
         gt_cache = gt_audio / 'cache'
         log.info(f'No gt cache specified, using default {gt_cache}')
-        log.info(
-            f'NOTE: If you are evaluating on video datasets, you must extract video cache separately'
-            + f' via extract_video.py. Otherwise video-related scores will be skipped.')
 
     if pred_cache is None:
         if pred_audio is None:
@@ -70,7 +82,7 @@ def main(args):
     log.info(f'Unpaired: {unpaired}')
 
     # extract for GT if needed
-    if not (gt_cache / 'passt_features_embed.pth').exists() or recompute_gt_cache:
+    if any(not (gt_cache / f).exists() for f in ('passt_logits.pth', 'vggish_features.pth')) or recompute_gt_cache:
         log.info('Extracting GT cache...')
         if gt_audio is None:
             raise ValueError('Must specify gt_audio to compute gt_cache')
@@ -88,7 +100,7 @@ def main(args):
         )
 
     # extract for pred if needed
-    if not (pred_cache / 'passt_features_embed.pth').exists() or recompute_pred_cache:
+    if any(not (pred_cache / f).exists() for f in ('passt_logits.pth', 'vggish_features.pth')) or recompute_pred_cache:
         log.info('Extracting pred cache...')
         if pred_audio is None:
             raise ValueError('Must specify pred_audio to compute pred_cache')

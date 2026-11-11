@@ -7,7 +7,7 @@ def get_eval_parser() -> ArgumentParser:
 
     # maximum length; does not pad if under (except internally in like PaSST)
     parser.add_argument('--audio_length', type=float)
-    parser.add_argument('--num_workers', type=int, default=32)
+    parser.add_argument('--num_workers', type=int, default=8)
 
     # only bs=1 supports variable audio length
     parser.add_argument('--gt_batch_size', type=int, default=1)
@@ -30,5 +30,8 @@ def get_eval_parser() -> ArgumentParser:
                         action='store_true',
                         help='skips ImageBind and SynchFormer computation')
     parser.add_argument('--skip_clap', action='store_true', help='skips CLAP computation')
+
+    parser.add_argument('--clap_only', action='store_true', help='compute LAION CLAP only')
+    parser.add_argument('--captions', type=Path, help='CSV with name and caption columns')
 
     return parser
