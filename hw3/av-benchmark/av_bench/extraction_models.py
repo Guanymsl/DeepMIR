@@ -42,22 +42,9 @@ class ExtractionModels(nn.Module):
         self.passt_model = get_basic_model(mode="all")
         self.passt_model.eval()
 
-        self.imagebind = imagebind_model.imagebind_huge(pretrained=True).eval()
+        #self.imagebind = imagebind_model.imagebind_huge(pretrained=True).eval()
 
-        self.laion_clap = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-base').eval()
-        self.laion_clap.load_ckpt(_clap_ckpt_path, verbose=False)
+        #self.laion_clap = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-base').eval()
+        #self.laion_clap.load_ckpt(_clap_ckpt_path, verbose=False)
 
-        self.ms_clap = CLAP(version='2023', use_cuda=True)
-
-        self.synchformer = Synchformer().eval()
-        sd = torch.load(_syncformer_ckpt_path, weights_only=True)
-        self.synchformer.load_state_dict(sd)
-
-        # from synchformer
-        self.sync_mel_spectrogram = torchaudio.transforms.MelSpectrogram(
-            sample_rate=16000,
-            win_length=400,
-            hop_length=160,
-            n_fft=1024,
-            n_mels=128,
-        )
+        #self.ms_clap = CLAP(version='2023', use_cuda=True)

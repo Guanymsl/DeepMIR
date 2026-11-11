@@ -1,15 +1,24 @@
 import logging
-from pathlib import Path
-from typing import List
-
 import torch
 import torchaudio
 import torchvision.transforms.v2 as v2
+import soundfile as sf
+
+from pathlib import Path
+from typing import List
 from pytorchvideo.data.clip_sampling import ConstantClipsPerVideoSampler
 from torch.utils.data import Dataset
 
 log = logging.getLogger()
 
+def load_audio(path):
+    audio, sample_rate = sf.read(
+        str(path),
+        dtype="float32",
+        always_2d=True,
+    )
+    waveform = torch.from_numpy(audio.T.copy())
+    return waveform, sample_rate
 
 # from ImageBind
 def get_clip_timepoints(clip_sampler, duration):
@@ -122,7 +131,7 @@ class AudioDataset(Dataset):
         return len(self.datalist)
 
     def read_from_file(self, audio_file):
-        waveform, sample_rate = torchaudio.load(audio_file)
+        waveform, sample_rate = load_audio(audio_file)
         waveform = waveform.mean(dim=0)  # mono
         waveform = waveform - waveform.mean()
 
@@ -163,7 +172,7 @@ class ImageBindAudioDataset(Dataset):
         clip_sampler = ConstantClipsPerVideoSampler(clip_duration=clip_duration,
                                                     clips_per_video=clips_per_video)
 
-        waveform, sr = torchaudio.load(audio_path)
+        waveform, sr = load_audio(audio_path)
         if sample_rate != sr:
             waveform = torchaudio.functional.resample(waveform, orig_freq=sr, new_freq=sample_rate)
         all_clips_timepoints = get_clip_timepoints(clip_sampler, waveform.size(1) / sample_rate)
@@ -205,7 +214,7 @@ class SynchformerAudioDataset(Dataset):
 
     def sample(self, idx: int):
         filename = self.datalist[idx]
-        waveform, sr = torchaudio.load(filename)
+        waveform, sr = load_audio(filename)
         waveform = waveform.mean(dim=0)
 
         if sr != 16000:

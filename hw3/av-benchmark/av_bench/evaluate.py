@@ -15,7 +15,6 @@ _syncformer_ckpt_path = Path(__file__).parent.parent / 'weights' / 'synchformer_
 log = logging.getLogger()
 device = 'cuda'
 
-
 @torch.inference_mode()
 def evaluate(gt_audio_cache: Path,
              pred_audio_cache: Path,
@@ -25,32 +24,20 @@ def evaluate(gt_audio_cache: Path,
              skip_video_related: bool = False,
              skip_clap: bool = False) -> Dict[str, float]:
 
-    sync_model = Synchformer().to(device).eval()
-    sd = torch.load(_syncformer_ckpt_path, weights_only=True)
-    sync_model.load_state_dict(sd)
-
     gt_audio_cache = gt_audio_cache.expanduser()
     pred_audio_cache = pred_audio_cache.expanduser()
-
-    gt_pann_features = torch.load(gt_audio_cache / 'pann_features.pth', weights_only=True)
-    pred_pann_features = torch.load(pred_audio_cache / 'pann_features.pth', weights_only=True)
 
     gt_vggish_features = torch.load(gt_audio_cache / 'vggish_features.pth', weights_only=True)
     pred_vggish_features = torch.load(pred_audio_cache / 'vggish_features.pth', weights_only=True)
 
     gt_passt_features = torch.load(gt_audio_cache / 'passt_features_embed.pth', weights_only=True)
-    pred_passt_features = torch.load(pred_audio_cache / 'passt_features_embed.pth',
-                                     weights_only=True)
+    pred_passt_features = torch.load(pred_audio_cache / 'passt_features_embed.pth', weights_only=True)
 
     gt_passt_logits = torch.load(gt_audio_cache / 'passt_logits.pth', weights_only=True)
     pred_passt_logits = torch.load(pred_audio_cache / 'passt_logits.pth', weights_only=True)
 
     # convert these dictionaries (with filenames as keys) to lists
     if is_paired:
-        paired_panns_logits, gt_panns_logits = unroll_paired_dict_with_key(gt_pann_features,
-                                                                           pred_pann_features,
-                                                                           num_samples=num_samples)
-
         if not skip_video_related and (gt_audio_cache / 'imagebind_video.pth').exists():
             ib_video_features = torch.load(gt_audio_cache / 'imagebind_video.pth',
                                            weights_only=True)
