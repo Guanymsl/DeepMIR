@@ -18,6 +18,7 @@ SECONDS = 10
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--csv', type=Path, default=Path('test.csv'))
     parser.add_argument('--scale', type=float, default=7.0)
     parser.add_argument('--eta', type=float, default=0.0)
     parser.add_argument('--momentum', type=float, default=-0.5)
@@ -182,17 +183,20 @@ def apply_apg(pipe, args):
 def main():
     args = parse_args()
 
-    output_dir = Path(
-        f'outputs/generated/apg_w{args.scale:g}_eta{args.eta:g}'
-        f'_m{args.momentum:g}_n{args.norm_threshold:g}'
-    )
+    if args.csv == Path('test.csv'):
+        output_dir = Path(
+            f'outputs/generated/apg_w{args.scale:g}_eta{args.eta:g}'
+            f'_m{args.momentum:g}_n{args.norm_threshold:g}'
+        )
+    else:
+        output_dir = Path('outputs/generated') / args.csv.stem
 
     dtype = torch.float16
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = read_captions(CAPTIONS_PATH)
+    rows = read_captions(args.csv)
     pipe = StableAudioPipeline.from_pretrained(MODEL_PATH, dtype=dtype)
     pipe = pipe.to(device)
     pipe.set_progress_bar_config(leave=False)

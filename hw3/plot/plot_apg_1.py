@@ -35,7 +35,7 @@ def main():
     fig.suptitle('Stable Audio Open 1.0 — APG Guidance Scale Sweep', fontsize=15)
     plt.tight_layout()
 
-    output = Path('outputs/evaluation/apg_scale_sweep.png')
+    output = Path('outputs/evaluation/apg_scale_sweep_1.png')
     fig.savefig(output, dpi=300, bbox_inches='tight')
 
     print('Saved:', output)
