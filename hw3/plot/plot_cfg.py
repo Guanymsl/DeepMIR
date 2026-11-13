@@ -25,7 +25,7 @@ def main():
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
 
     for ax, (metric, title) in zip(axes.flat, METRICS.items()):
-        ax.plot(SCALES, results[metric], marker='o', linewidth=2)
+        ax.plot(SCALES, results[metric], marker='o', linewidth=2, color='#0072B2')
         ax.set_title(title)
         ax.set_xlabel('CFG Guidance Scale')
         ax.set_ylabel(metric)
