@@ -9,7 +9,5 @@ soundfile==0.14.0
 
 huggingface_hub
 torchcodec
-#soundfile
-#tqdm
-#laion-clap
+laion-clap
 openai
